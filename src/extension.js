@@ -133,7 +133,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
   .canvas { position:relative; min-width:max-content; }
   .laneHeader { position:sticky; top:0; z-index:8; height:var(--header-h); border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editor-background); }
   .laneTitle { position:absolute; bottom:10px; max-width:var(--lane-title-max-w, 130px); padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); }
-  .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
+  .laneTitle.current { outline:2px solid var(--vscode-focusBorder); font-weight:700; background:var(--vscode-statusBarItem-prominentBackground, var(--vscode-badge-background)); }
   .laneTitle.history { opacity:.65; font-style:italic; }
   .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
   .commitPopover, .edgePopover { position:fixed; z-index:20; max-width:360px; padding:7px 10px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; display:none; }
@@ -209,10 +209,13 @@ document.body.appendChild(branchPopover);
 
 const laneTitleEls = [];
 model.lanes.forEach((lane, i) => {
+  const isCurrent = Boolean(branchMap.get(lane)?.current);
   const el = document.createElement('div');
-  el.className = 'laneTitle' + (branchMap.get(lane)?.current ? ' current' : '') + (lane === 'history' ? ' history' : '');
-  el.textContent = lane;
-  el.title = lane === 'history' ? 'Commits not assigned to the first-parent chain of a current branch' : '';
+  el.className = 'laneTitle' + (isCurrent ? ' current' : '') + (lane === 'history' ? ' history' : '');
+  el.textContent = (isCurrent ? '✓ ' : '') + lane;
+  el.title = lane === 'history'
+    ? 'Commits not assigned to the first-parent chain of a current branch'
+    : (isCurrent ? lane + ' (currently checked out)' : '');
   el.style.left = laneX(i) + 'px';
   el.dataset.lane = lane;
   el.onclick = () => {
@@ -221,7 +224,7 @@ model.lanes.forEach((lane, i) => {
     applyFilter();
   };
   el.onmouseenter = () => {
-    branchPopover.textContent = lane === 'history' ? 'history' : lane;
+    branchPopover.textContent = lane === 'history' ? 'history' : (isCurrent ? lane + ' (current)' : lane);
     branchPopover.style.display = 'block';
     const rect = el.getBoundingClientRect();
     branchPopover.style.left = rect.left + 'px';
