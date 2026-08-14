@@ -1,7 +1,8 @@
 'use strict';
 
+const path = require('node:path');
 const vscode = require('vscode');
-const { isGitRepository, loadRepository } = require('./git');
+const { isGitRepository, loadRepository, readCommitFiles } = require('./git');
 const { buildLayout } = require('./layout');
 
 let currentPanel;
@@ -64,6 +65,17 @@ async function openGitRail(context) {
       await vscode.env.clipboard.writeText(message.hash);
       vscode.window.setStatusBarMessage(`Git Rail: copied ${message.hash.slice(0, 8)}`, 1800);
     }
+    if (message?.type === 'commitFiles' && message.hash) {
+      try {
+        const files = await readCommitFiles(folder.uri.fsPath, message.hash);
+        panel.webview.postMessage({ type: 'commitFiles', hash: message.hash, files });
+      } catch (error) {
+        panel.webview.postMessage({ type: 'commitFiles', hash: message.hash, files: [], error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    if (message?.type === 'openDiff' && message.hash && message.filePath) {
+      await openFileDiff(folder, message.hash, message.filePath, message.status);
+    }
   });
 
   panel.webview.html = loadingHtml();
@@ -94,6 +106,34 @@ async function refreshPanel() {
   } catch (error) {
     panel.webview.html = errorHtml(error instanceof Error ? error.message : String(error));
   }
+}
+
+function toGitUri(fsPath, ref) {
+  return vscode.Uri.file(fsPath).with({
+    scheme: 'git',
+    query: JSON.stringify({ path: fsPath, ref })
+  });
+}
+
+async function openFileDiff(folder, hash, filePath, status) {
+  const fsPath = path.join(folder.uri.fsPath, filePath);
+  const short = hash.slice(0, 8);
+  const fileName = path.basename(filePath);
+
+  if (status === 'A') {
+    await vscode.commands.executeCommand('vscode.open', toGitUri(fsPath, hash), {}, `${fileName} (${short})`);
+    return;
+  }
+  if (status === 'D') {
+    await vscode.commands.executeCommand('vscode.open', toGitUri(fsPath, `${hash}^`), {}, `${fileName} (${short}^)`);
+    return;
+  }
+  await vscode.commands.executeCommand(
+    'vscode.diff',
+    toGitUri(fsPath, `${hash}^`),
+    toGitUri(fsPath, hash),
+    `${fileName} (${short}^ ↔ ${short})`
+  );
 }
 
 function loadingHtml() {
@@ -142,6 +182,24 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
   .commitPopover .meta, .edgePopover .meta { color:var(--vscode-descriptionForeground); }
   .edgePopover .row { margin:2px 0; }
   .edgePopover .lane { color:var(--vscode-textLink-foreground); }
+  .commitDetailsPanel { position:fixed; z-index:25; display:none; flex-direction:column; width:420px; height:280px; min-width:260px; min-height:120px; max-width:90vw; max-height:70vh; overflow:hidden; resize:both; padding:9px 12px; border-radius:6px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 4px 16px rgba(0,0,0,.4); }
+  .commitDetailsPanel .closeBtn { position:absolute; top:6px; right:8px; font-size:16px; line-height:1; color:var(--vscode-descriptionForeground); cursor:pointer; }
+  .commitDetailsPanel .closeBtn:hover { color:var(--vscode-foreground); }
+  .commitDetailsPanel .detailsHeader { flex:0 0 auto; padding-right:20px; }
+  .commitDetailsPanel .detailsBody { flex:1 1 auto; overflow:auto; }
+  .commitDetailsPanel .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); }
+  .commitDetailsPanel .subject { display:block; margin:4px 0; font-weight:600; white-space:normal; word-break:break-word; }
+  .commitDetailsPanel .meta { color:var(--vscode-descriptionForeground); display:block; margin-bottom:8px; }
+  .commitDetailsPanel .fileList { border-top:1px solid var(--vscode-panel-border); padding-top:6px; }
+  .commitDetailsPanel .file { display:flex; align-items:baseline; gap:6px; padding:2px 0; cursor:pointer; overflow:hidden; }
+  .commitDetailsPanel .file:hover .fileName { text-decoration:underline; }
+  .commitDetailsPanel .status { width:14px; flex:0 0 auto; font-weight:700; font-family:var(--vscode-editor-font-family); }
+  .commitDetailsPanel .status.A { color:var(--vscode-gitDecoration-addedResourceForeground, green); }
+  .commitDetailsPanel .status.M { color:var(--vscode-gitDecoration-modifiedResourceForeground, orange); }
+  .commitDetailsPanel .status.D { color:var(--vscode-gitDecoration-deletedResourceForeground, red); }
+  .commitDetailsPanel .fileName { flex:0 0 auto; white-space:nowrap; }
+  .commitDetailsPanel .filePath { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--vscode-descriptionForeground); font-size:11px; }
+  .details .subject, .details .meta { cursor:pointer; pointer-events:auto; }
   .searchBar { position:absolute; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; align-items:stretch; gap:6px; }
   .compactToggles { display:flex; align-items:center; gap:10px; }
   .search { flex:1 1 auto; box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
@@ -326,6 +384,82 @@ const commitPopover = document.createElement('div');
 commitPopover.className = 'commitPopover';
 document.body.appendChild(commitPopover);
 
+const commitDetailsPanel = document.createElement('div');
+commitDetailsPanel.className = 'commitDetailsPanel';
+commitDetailsPanel.onclick = (e) => e.stopPropagation();
+const commitDetailsClose = document.createElement('span');
+commitDetailsClose.className = 'closeBtn';
+commitDetailsClose.textContent = '×';
+commitDetailsClose.title = 'Close';
+commitDetailsClose.onclick = () => { commitDetailsPanel.style.display = 'none'; };
+commitDetailsPanel.appendChild(commitDetailsClose);
+const commitDetailsHeader = document.createElement('div');
+commitDetailsHeader.className = 'detailsHeader';
+commitDetailsPanel.appendChild(commitDetailsHeader);
+const commitDetailsBody = document.createElement('div');
+commitDetailsBody.className = 'detailsBody';
+commitDetailsPanel.appendChild(commitDetailsBody);
+document.body.appendChild(commitDetailsPanel);
+document.addEventListener('click', () => { commitDetailsPanel.style.display = 'none'; });
+
+let openCommitHash = null;
+function statusLabel(status) { return (status || '').charAt(0); }
+function commitDetailsHeaderHtml(row, date) {
+  return '<span class="hash">' + row.shortHash + '</span>' +
+    '<span class="subject">' + escapeHtmlClient(row.subject) + '</span>' +
+    '<span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
+}
+function renderCommitFiles(row, date, msg) {
+  if (msg.hash !== openCommitHash) return;
+  commitDetailsHeader.innerHTML = commitDetailsHeaderHtml(row, date);
+  if (msg.error) {
+    commitDetailsBody.innerHTML = '<div class="meta">Could not load files: ' + escapeHtmlClient(msg.error) + '</div>';
+    return;
+  }
+  if (!msg.files.length) {
+    commitDetailsBody.innerHTML = '<div class="meta">No file changes.</div>';
+    return;
+  }
+  function splitPath(p) {
+    const idx = p.lastIndexOf('/');
+    return idx === -1 ? { name: p, dir: '' } : { name: p.slice(idx + 1), dir: p.slice(0, idx) };
+  }
+  const fileList = msg.files.map((f) => {
+    const { name, dir } = splitPath(f.path);
+    let label = '<span class="fileName">' + escapeHtmlClient(name) + '</span>';
+    if (dir) label += '<span class="filePath">' + escapeHtmlClient(dir) + '</span>';
+    if (f.oldPath) label += '<span class="filePath">(renamed from ' + escapeHtmlClient(f.oldPath) + ')</span>';
+    return '<div class="file" data-path="' + escapeForAttr(f.path) + '" data-status="' + escapeForAttr(f.status) + '">' +
+      '<span class="status ' + statusLabel(f.status) + '">' + escapeHtmlClient(statusLabel(f.status)) + '</span>' +
+      label + '</div>';
+  }).join('');
+  commitDetailsBody.innerHTML = '<div class="fileList">' + fileList + '</div>';
+  commitDetailsBody.querySelectorAll('.file').forEach((fileEl) => {
+    fileEl.onclick = () => vscode.postMessage({
+      type: 'openDiff', hash: row.hash, filePath: fileEl.dataset.path, status: fileEl.dataset.status
+    });
+  });
+}
+window.addEventListener('message', (event) => {
+  const msg = event.data;
+  if (msg?.type === 'commitFiles') {
+    const row = rowByHash.get(msg.hash);
+    if (!row) return;
+    const date = new Date(row.timestamp).toLocaleString(undefined, {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    renderCommitFiles(row, date, msg);
+  }
+});
+function openCommitDetails(e, row, date) {
+  e.stopPropagation();
+  openCommitHash = row.hash;
+  commitDetailsHeader.innerHTML = commitDetailsHeaderHtml(row, date);
+  commitDetailsBody.innerHTML = '<div class="meta">Loading files…</div>';
+  commitDetailsPanel.style.display = 'flex';
+  commitDetailsPanel.style.left = Math.min(e.clientX + 12, window.innerWidth - 440) + 'px';
+  commitDetailsPanel.style.top = Math.min(e.clientY + 12, window.innerHeight - 300) + 'px';
+  vscode.postMessage({ type: 'commitFiles', hash: row.hash });
+}
+
 const commitEls = [];
 model.rows.forEach(row => {
   const el = document.createElement('div');
@@ -351,6 +485,9 @@ model.rows.forEach(row => {
   details.className = 'details'; details.style.marginLeft = (graphWidth + 8) + 'px';
   details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span><span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
   details.querySelector('.hash').onclick = () => vscode.postMessage({type:'copyHash', hash:row.hash});
+  details.querySelector('.subject').title += (details.querySelector('.subject').title ? ' — ' : '') + 'Click for commit details';
+  details.querySelector('.subject').onclick = (e) => openCommitDetails(e, row, date);
+  details.querySelector('.meta').onclick = (e) => openCommitDetails(e, row, date);
   el.appendChild(details);
   canvas.appendChild(el);
   commitEls.push({ el, row, node, details });

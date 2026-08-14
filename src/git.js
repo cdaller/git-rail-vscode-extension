@@ -69,6 +69,20 @@ async function readCommits(cwd, maxCommits) {
     });
 }
 
+async function readCommitFiles(cwd, hash) {
+  const out = await runGit(cwd, ['diff-tree', '--no-commit-id', '--name-status', '-r', hash]);
+  return out
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [status, ...pathParts] = line.split('\t');
+      // Renames/copies report two paths (old\tnew); the rest report just one.
+      const oldPath = pathParts.length > 1 ? pathParts[0] : undefined;
+      const path = pathParts.length > 1 ? pathParts[1] : pathParts[0];
+      return { status, path, oldPath };
+    });
+}
+
 async function readFirstParentDistances(cwd, branches, visibleHashes) {
   const visible = new Set(visibleHashes);
   const candidates = new Map();
@@ -121,6 +135,7 @@ module.exports = {
   isGitRepository,
   readBranches,
   readCommits,
+  readCommitFiles,
   readFirstParentDistances,
   loadRepository
 };
