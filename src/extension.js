@@ -336,7 +336,7 @@ if (model.hasMore) {
 
 function parseFilterTokens(str) {
   const tokens = [];
-  const re = /(author|message|commit)\\s*:\\s*(?:"([^"]*)"|'([^']*)'|(\\S+))|"([^"]*)"|'([^']*)'|(\\S+)/gi;
+  const re = /(author|message|commit|branch)\\s*:\\s*(?:"([^"]*)"|'([^']*)'|(\\S+))|"([^"]*)"|'([^']*)'|(\\S+)/gi;
   let m;
   while ((m = re.exec(str))) {
     if (m[1] !== undefined) {
@@ -360,6 +360,10 @@ function fieldMatches(row, criteria, text, exact) {
   if (criteria === 'message') {
     const subject = row.subject.toLowerCase();
     return exact ? wordsOf(row.subject).includes(t) : subject.includes(t);
+  }
+  if (criteria === 'branch') {
+    const lane = row.lane.toLowerCase();
+    return exact ? lane === t : lane.includes(t);
   }
   const author = row.author.toLowerCase();
   return exact ? wordsOf(row.author).includes(t) : author.includes(t);
