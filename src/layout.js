@@ -44,6 +44,22 @@ function buildLayout(repository, options = {}) {
     });
   }
 
+  // A commit shared by several branches is usually just one point in a long run of shared
+  // ancestry (everything before the earliest divergence is trivially shared by all of them).
+  // Marking every one of those would be noise, so only the topmost (newest) commit of a
+  // shared run — where a child's own branch set narrows or the run starts — is flagged.
+  const childrenByParentHash = new Map();
+  edges.forEach((edge) => {
+    if (!childrenByParentHash.has(edge.parentHash)) childrenByParentHash.set(edge.parentHash, []);
+    childrenByParentHash.get(edge.parentHash).push(edge.childHash);
+  });
+  const sameBranchSet = (a, b) => a.length === b.length && new Set(a).size === new Set([...a, ...b]).size;
+  rows.forEach((row) => {
+    if (row.branches.length <= 1) { row.sharedBoundary = false; return; }
+    const children = (childrenByParentHash.get(row.hash) || []).map((hash) => rowByHash.get(hash)).filter(Boolean);
+    row.sharedBoundary = children.every((child) => !sameBranchSet(child.branches, row.branches));
+  });
+
   return { lanes, rows, edges };
 }
 

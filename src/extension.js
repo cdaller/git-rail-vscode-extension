@@ -607,13 +607,13 @@ model.rows.forEach(row => {
 
   const date = new Date(row.timestamp).toLocaleString(undefined, {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 
-  const isSharedBase = row.branches && row.branches.length > 1;
+  const isShared = row.branches && row.branches.length > 1;
   const node = document.createElement('span');
-  node.className = 'node' + (isSharedBase ? ' sharedBase' : '');
+  node.className = 'node' + (row.sharedBoundary ? ' sharedBase' : '');
   node.style.left = laneX(row.laneIndex) + 'px';
   node.onmouseenter = () => {
     commitPopover.innerHTML = '<span class="hash">' + row.shortHash + '</span><span class="subject">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>' +
-      (isSharedBase ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '');
+      (isShared ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '');
     commitPopover.style.display = 'block';
     const rect = node.getBoundingClientRect();
     commitPopover.style.left = (rect.right + 10) + 'px';
