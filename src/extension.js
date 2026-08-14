@@ -179,6 +179,7 @@ const branchPopover = document.createElement('div');
 branchPopover.className = 'branchPopover';
 document.body.appendChild(branchPopover);
 
+const laneTitleEls = [];
 model.lanes.forEach((lane, i) => {
   const el = document.createElement('div');
   el.className = 'laneTitle' + (branchMap.get(lane)?.current ? ' current' : '') + (lane === 'history' ? ' history' : '');
@@ -196,6 +197,7 @@ model.lanes.forEach((lane, i) => {
   };
   el.onmouseleave = () => { branchPopover.style.display = 'none'; };
   header.appendChild(el);
+  laneTitleEls.push(el);
 });
 
 const searchBar = document.createElement('div');
@@ -207,7 +209,7 @@ header.appendChild(searchBar);
 const search = document.createElement('input');
 search.type = 'search';
 search.className = 'search';
-search.placeholder = 'Filter by hash, message, author (words are OR-combined, "quoted" = exact match)';
+search.placeholder = 'Filter (words OR-combined, "quoted" = exact); or author:x message:x commit:x';
 searchBar.appendChild(search);
 
 const compactToggle = document.createElement('label');
@@ -286,51 +288,125 @@ model.rows.forEach(row => {
   details.querySelector('.hash').onclick = () => vscode.postMessage({type:'copyHash', hash:row.hash});
   el.appendChild(details);
   canvas.appendChild(el);
-  commitEls.push({ el, row });
+  commitEls.push({ el, row, node, details });
 });
 
 function parseFilterTokens(str) {
   const tokens = [];
-  const re = /"([^"]*)"|'([^']*)'|([^ ]+)/g;
+  const re = /(author|message|commit)\\s*:\\s*(?:"([^"]*)"|'([^']*)'|(\\S+))|"([^"]*)"|'([^']*)'|(\\S+)/gi;
   let m;
   while ((m = re.exec(str))) {
-    if (m[1] !== undefined) tokens.push({ text: m[1], exact: true });
-    else if (m[2] !== undefined) tokens.push({ text: m[2], exact: true });
-    else tokens.push({ text: m[3], exact: false });
+    if (m[1] !== undefined) {
+      const criteria = m[1].toLowerCase();
+      if (m[2] !== undefined) tokens.push({ criteria, text: m[2], exact: true });
+      else if (m[3] !== undefined) tokens.push({ criteria, text: m[3], exact: true });
+      else tokens.push({ criteria, text: m[4], exact: false });
+    } else if (m[5] !== undefined) tokens.push({ criteria: null, text: m[5], exact: true });
+    else if (m[6] !== undefined) tokens.push({ criteria: null, text: m[6], exact: true });
+    else tokens.push({ criteria: null, text: m[7], exact: false });
   }
   return tokens.filter(t => t.text.length);
 }
 function wordsOf(s) { return s.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean); }
+function fieldMatches(row, criteria, text, exact) {
+  const t = text.toLowerCase();
+  if (criteria === 'commit') {
+    const hash = row.hash.toLowerCase();
+    return exact ? hash === t : hash.includes(t);
+  }
+  if (criteria === 'message') {
+    const subject = row.subject.toLowerCase();
+    return exact ? wordsOf(row.subject).includes(t) : subject.includes(t);
+  }
+  const author = row.author.toLowerCase();
+  return exact ? wordsOf(row.author).includes(t) : author.includes(t);
+}
 function rowMatchesFilter(row, tokens) {
   if (!tokens.length) return true;
-  const hash = row.hash.toLowerCase();
-  const subject = row.subject.toLowerCase();
-  const author = row.author.toLowerCase();
-  const subjectWords = wordsOf(row.subject);
-  const authorWords = wordsOf(row.author);
-  return tokens.some(({ text, exact }) => {
-    const t = text.toLowerCase();
-    if (exact) return hash === t || subjectWords.includes(t) || authorWords.includes(t);
-    return hash.includes(t) || subject.includes(t) || author.includes(t);
+  const byCriteria = new Map();
+  const bare = [];
+  tokens.forEach((tok) => {
+    if (!tok.criteria) { bare.push(tok); return; }
+    if (!byCriteria.has(tok.criteria)) byCriteria.set(tok.criteria, []);
+    byCriteria.get(tok.criteria).push(tok);
   });
+  for (const [criteria, toks] of byCriteria) {
+    if (!toks.some(({ text, exact }) => fieldMatches(row, criteria, text, exact))) return false;
+  }
+  if (bare.length) {
+    const hash = row.hash.toLowerCase();
+    const subject = row.subject.toLowerCase();
+    const author = row.author.toLowerCase();
+    const subjectWords = wordsOf(row.subject);
+    const authorWords = wordsOf(row.author);
+    const anyBareMatch = bare.some(({ text, exact }) => {
+      const t = text.toLowerCase();
+      if (exact) return hash === t || subjectWords.includes(t) || authorWords.includes(t);
+      return hash.includes(t) || subject.includes(t) || author.includes(t);
+    });
+    if (!anyBareMatch) return false;
+  }
+  return true;
 }
 function applyFilter() {
   const tokens = parseFilterTokens(search.value);
   const compact = compactCheckbox.checked && tokens.length > 0;
 
   const compactRowIndex = new Map();
+  const visibleLanes = new Set();
   let visibleCount = 0;
-  commitEls.forEach(({ el, row }) => {
+  commitEls.forEach(({ row }) => {
+    const matches = rowMatchesFilter(row, tokens);
+    if (compact && matches) {
+      compactRowIndex.set(row.row, visibleCount);
+      visibleCount++;
+      visibleLanes.add(row.laneIndex);
+    }
+  });
+
+  const compactLaneIndex = new Map();
+  if (compact) {
+    model.lanes.forEach((lane, i) => {
+      if (visibleLanes.has(i)) compactLaneIndex.set(i, compactLaneIndex.size);
+    });
+  }
+  function currentLaneX(origIndex) {
+    return compact ? laneX(compactLaneIndex.get(origIndex)) : laneX(origIndex);
+  }
+
+  const currentGraphWidth = compact
+    ? Math.max(laneW, compactLaneIndex.size * laneW + graphPadding * 2)
+    : graphWidth;
+  const currentWidth = Math.max(500, currentGraphWidth + detailsW);
+
+  model.lanes.forEach((lane, i) => {
+    const show = !compact || visibleLanes.has(i);
+    laneTitleEls[i].style.display = show ? '' : 'none';
+    railEls[i].style.display = show ? '' : 'none';
+    if (show) {
+      laneTitleEls[i].style.left = currentLaneX(i) + 'px';
+      railEls[i].setAttribute('x1', currentLaneX(i));
+      railEls[i].setAttribute('x2', currentLaneX(i));
+    }
+  });
+
+  commitEls.forEach(({ el, row, node, details }) => {
     const matches = rowMatchesFilter(row, tokens);
     el.style.display = matches ? '' : 'none';
+    el.style.width = currentWidth + 'px';
     if (!compact) {
       el.style.top = (headerH + row.row * rowH) + 'px';
     } else if (matches) {
-      el.style.top = (headerH + visibleCount * rowH) + 'px';
-      compactRowIndex.set(row.row, visibleCount);
-      visibleCount++;
+      el.style.top = (headerH + compactRowIndex.get(row.row) * rowH) + 'px';
     }
+    if (matches) node.style.left = currentLaneX(row.laneIndex) + 'px';
+    details.style.marginLeft = (currentGraphWidth + 8) + 'px';
   });
+
+  canvas.style.width = currentWidth + 'px';
+  header.style.width = currentWidth + 'px';
+  searchBar.style.left = (currentGraphWidth + 8) + 'px';
+  svg.setAttribute('width', currentGraphWidth);
 
   const newBodyHeight = compact ? Math.max(rowH, visibleCount * rowH) : bodyHeight;
   canvas.style.height = (headerH + newBodyHeight) + 'px';
@@ -350,7 +426,7 @@ function applyFilter() {
       return;
     }
     path.style.display = '';
-    path.setAttribute('d', edgePathD(laneX(edge.fromLane), rowY(fromIdx), laneX(edge.toLane), rowY(toIdx)));
+    path.setAttribute('d', edgePathD(currentLaneX(edge.fromLane), rowY(fromIdx), currentLaneX(edge.toLane), rowY(toIdx)));
   });
 }
 search.addEventListener('input', applyFilter);
