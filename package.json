@@ -1,0 +1,57 @@
+{
+  "name": "git-rail",
+  "displayName": "Git Rail",
+  "description": "Visualize Git history with stable branch rails that are easy to follow from top to bottom.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": ["Other", "Visualization"],
+  "keywords": ["git", "branch", "graph", "history", "visualization"],
+  "activationEvents": [
+    "onCommand:gitRail.open"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitRail.open",
+        "title": "Git Rail: Open Branch Map",
+        "category": "Git Rail",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "gitRail.refresh",
+        "title": "Git Rail: Refresh",
+        "category": "Git Rail",
+        "icon": "$(refresh)"
+      }
+    ],
+    "configuration": {
+      "title": "Git Rail",
+      "properties": {
+        "gitRail.maxCommits": {
+          "type": "number",
+          "default": 300,
+          "minimum": 20,
+          "maximum": 5000,
+          "description": "Maximum number of commits shown in the branch map."
+        },
+        "gitRail.includeRemoteBranches": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include remote-tracking branches as separate rails."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/extension.js && node --check src/git.js && node --check src/layout.js && node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0"
+  }
+}
