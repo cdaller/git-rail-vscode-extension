@@ -61,7 +61,9 @@ MIT
 
 ## TODO
 
-* filter branches
-* allow multiselect on branches. add a checkbox to hide all non selected branches completely. rails to non shown branches should be summarized in on "hidden branch" rail
-* when search filter is applied, optionally remove the lines that do not match the filter expression (configurable)
-* add "load more commits" button at the end
+* color mode (configurable): draw each branch lane in different colors
+* rename to git-lanes
+* unify the local branch ant its remote origin, so it does not appear as two branches in the lanes
+* mark currently checked our branch label
+* add "!" icon to local branches with commits that are not merged into another branch or not pushed
+* "ahead of remote branch" (⇡)

@@ -8,8 +8,17 @@
   "engines": {
     "vscode": "^1.96.0"
   },
-  "categories": ["Other", "Visualization"],
-  "keywords": ["git", "branch", "graph", "history", "visualization"],
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "git",
+    "branch",
+    "graph",
+    "history",
+    "visualization"
+  ],
   "activationEvents": [
     "onCommand:gitRail.open"
   ],
@@ -70,5 +79,8 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.96.0"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.46-24"
   }
 }

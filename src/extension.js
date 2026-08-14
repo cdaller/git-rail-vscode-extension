@@ -47,7 +47,11 @@ async function openGitRail(context) {
     'gitRail.branchMap',
     `Git Rail — ${folder.name}`,
     vscode.ViewColumn.Active,
-    { enableScripts: true, retainContextWhenHidden: true }
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist')]
+    }
   );
 
   currentPanel = { panel, folder, context };
@@ -84,7 +88,7 @@ async function openGitRail(context) {
 
 async function refreshPanel() {
   if (!currentPanel) return;
-  const { panel, folder } = currentPanel;
+  const { panel, folder, context } = currentPanel;
 
   try {
     const config = vscode.workspace.getConfiguration('gitRail', folder.uri);
@@ -102,7 +106,10 @@ async function refreshPanel() {
       hideEmptyBranches: config.get('hideEmptyBranches', true)
     });
     const maxBranchLabelWidth = config.get('maxBranchLabelWidth', 130);
-    panel.webview.html = renderHtml(folder.name, layout, repository.branches, hasMore, maxBranchLabelWidth);
+    const codiconCssUri = panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(context.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')
+    );
+    panel.webview.html = renderHtml(folder.name, layout, repository.branches, hasMore, maxBranchLabelWidth, codiconCssUri);
   } catch (error) {
     panel.webview.html = errorHtml(error instanceof Error ? error.message : String(error));
   }
@@ -153,13 +160,14 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
+function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, codiconCssUri) {
   const data = JSON.stringify({ ...layout, branches, hasMore: Boolean(hasMore), maxBranchLabelWidth: maxBranchLabelWidth || 130 }).replaceAll('<', '\\u003c');
   return `<!doctype html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="stylesheet" href="${codiconCssUri}">
 <style>
   :root { --row-h: 38px; --lane-w: 60px; --header-h: 110px; }
   * { box-sizing: border-box; }
@@ -172,9 +180,13 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
   .viewport { overflow:auto; height:calc(100vh - 43px); }
   .canvas { position:relative; min-width:max-content; }
   .laneHeader { position:sticky; top:0; z-index:8; height:var(--header-h); border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editor-background); }
-  .laneTitle { position:absolute; bottom:10px; max-width:var(--lane-title-max-w, 130px); padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); }
+  .laneTitle { position:absolute; bottom:10px; max-width:var(--lane-title-max-w, 130px); padding:3px 7px; border-radius:5px; cursor:pointer; overflow:hidden; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); display:flex; align-items:center; gap:3px; }
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); font-weight:700; background:var(--vscode-statusBarItem-prominentBackground, var(--vscode-badge-background)); }
   .laneTitle.history { opacity:.65; font-style:italic; }
+  .laneTitle .warnIcon, .laneTitle .currentMark, .laneTitle .remoteIcon { flex:0 0 auto; }
+  .laneTitle .warnIcon { color:var(--vscode-editorWarning-foreground, #cca700); font-weight:800; }
+  .laneTitle .remoteIcon { color:inherit; font-size:12px; }
+  .laneTitle .labelText { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
   .commitPopover, .edgePopover { position:fixed; z-index:20; max-width:360px; padding:7px 10px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; display:none; }
   .commitPopover .hash, .edgePopover .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); }
@@ -267,13 +279,23 @@ document.body.appendChild(branchPopover);
 
 const laneTitleEls = [];
 model.lanes.forEach((lane, i) => {
-  const isCurrent = Boolean(branchMap.get(lane)?.current);
+  const branch = branchMap.get(lane);
+  const isCurrent = Boolean(branch?.current);
+  const hasRemote = Boolean(branch?.hasRemote);
+  const warnReasons = [];
+  if (branch?.unmerged) warnReasons.push('not merged into another branch');
+  if (branch?.notPushed) warnReasons.push('not pushed to its upstream');
+  const warn = warnReasons.length > 0;
+
   const el = document.createElement('div');
-  el.className = 'laneTitle' + (isCurrent ? ' current' : '') + (lane === 'history' ? ' history' : '');
-  el.textContent = (isCurrent ? '✓ ' : '') + lane;
+  el.className = 'laneTitle' + (isCurrent ? ' current' : '') + (lane === 'history' ? ' history' : '') + (warn ? ' warn' : '');
+  el.innerHTML = (warn ? '<span class="warnIcon">!</span>' : '') +
+    (hasRemote ? '<span class="remoteIcon codicon codicon-remote"></span>' : '') +
+    (isCurrent ? '<span class="currentMark">✓</span>' : '') +
+    '<span class="labelText">' + escapeHtmlClient(lane) + '</span>';
   el.title = lane === 'history'
     ? 'Commits not assigned to the first-parent chain of a current branch'
-    : (isCurrent ? lane + ' (currently checked out)' : '');
+    : [isCurrent ? 'currently checked out' : '', hasRemote ? 'has a remote branch' : '', warnReasons.join(' · ')].filter(Boolean).join(' — ');
   el.style.left = laneX(i) + 'px';
   el.dataset.lane = lane;
   el.onclick = () => {
@@ -282,7 +304,7 @@ model.lanes.forEach((lane, i) => {
     applyFilter();
   };
   el.onmouseenter = () => {
-    branchPopover.textContent = lane === 'history' ? 'history' : (isCurrent ? lane + ' (current)' : lane);
+    branchPopover.textContent = lane === 'history' ? 'history' : (isCurrent ? lane + ' (current)' : lane) + (warn ? ' ⚠' : '');
     branchPopover.style.display = 'block';
     const rect = el.getBoundingClientRect();
     branchPopover.style.left = rect.left + 'px';

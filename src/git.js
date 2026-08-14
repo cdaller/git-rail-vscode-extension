@@ -32,15 +32,46 @@ async function readBranches(cwd, includeRemoteBranches, includeLocalBranches = t
   const format = '%(refname)%00%(refname:short)%00%(objectname)%00%(HEAD)';
   const out = await runGit(cwd, ['for-each-ref', `--format=${format}`, ...refs]);
 
-  return out
+  const all = out
     .split('\n')
     .filter(Boolean)
     .map((line) => {
       const [ref, name, tip, head] = line.split('\0');
       return { ref, name, tip, current: head === '*' };
     })
-    .filter((b) => !b.ref.endsWith('/HEAD'))
-    .sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
+    .filter((b) => !b.ref.endsWith('/HEAD'));
+
+  // A remote-tracking branch that mirrors an existing local branch (e.g. "origin/main" next
+  // to "main") would otherwise show up as a second, redundant lane for the same branch.
+  const localNames = new Set(all.filter((b) => b.ref.startsWith('refs/heads/')).map((b) => b.name));
+
+  // Local branches are flagged with a "has a remote" indicator even when remote lanes
+  // themselves aren't shown, so this is checked independently of includeRemoteBranches.
+  let remoteBranchNames;
+  if (includeRemoteBranches) {
+    remoteBranchNames = new Set(
+      all.filter((b) => b.ref.startsWith('refs/remotes/')).map((b) => b.name.split('/').slice(1).join('/'))
+    );
+  } else {
+    const remoteOut = await runGit(cwd, ['for-each-ref', '--format=%(refname)%00%(refname:short)', 'refs/remotes']);
+    remoteBranchNames = new Set(
+      remoteOut
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('\0'))
+        .filter(([ref]) => !ref.endsWith('/HEAD'))
+        .map(([, name]) => name.split('/').slice(1).join('/'))
+    );
+  }
+
+  const deduped = all
+    .filter((b) => {
+      if (!b.ref.startsWith('refs/remotes/')) return true;
+      return !localNames.has(b.name.split('/').slice(1).join('/'));
+    })
+    .map((b) => (b.ref.startsWith('refs/heads/') ? { ...b, hasRemote: remoteBranchNames.has(b.name) } : b));
+
+  return deduped.sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
 }
 
 async function readCommits(cwd, maxCommits) {
@@ -111,6 +142,40 @@ async function readFirstParentDistances(cwd, branches, visibleHashes) {
   return new Map([...candidates].map(([hash, value]) => [hash, value.branch]));
 }
 
+async function readBranchWarnings(cwd, localBranches) {
+  const warnings = new Map();
+  await Promise.all(localBranches.map(async (branch) => {
+    const format = '%(upstream)%00%(upstream:track)';
+    let upstream = '';
+    let track = '';
+    try {
+      const out = await runGit(cwd, ['for-each-ref', `--format=${format}`, branch.ref]);
+      [upstream, track] = out.trim().split('\0');
+    } catch {
+      // Ref can disappear during refresh; treat as not pushed.
+    }
+    const notPushed = !upstream || track.includes('ahead');
+
+    let unmerged = true;
+    try {
+      const containsOut = await runGit(cwd, [
+        'for-each-ref', '--format=%(refname:short)', '--contains', branch.tip,
+        'refs/heads', 'refs/remotes'
+      ]);
+      const containedIn = containsOut
+        .split('\n')
+        .filter(Boolean)
+        .filter((refName) => refName !== branch.name && refName.split('/').slice(1).join('/') !== branch.name);
+      unmerged = containedIn.length === 0;
+    } catch {
+      // A ref can disappear during refresh; assume unmerged so the warning stays visible.
+    }
+
+    warnings.set(branch.name, { unmerged, notPushed, warn: unmerged || notPushed });
+  }));
+  return warnings;
+}
+
 async function loadRepository(cwd, options = {}) {
   const maxCommits = options.maxCommits || 300;
   const includeRemoteBranches = Boolean(options.includeRemoteBranches);
@@ -121,13 +186,14 @@ async function loadRepository(cwd, options = {}) {
     readCommits(cwd, maxCommits)
   ]);
 
-  const ownerByHash = await readFirstParentDistances(
-    cwd,
-    branches,
-    commits.map((c) => c.hash)
-  );
+  const [ownerByHash, branchWarnings] = await Promise.all([
+    readFirstParentDistances(cwd, branches, commits.map((c) => c.hash)),
+    readBranchWarnings(cwd, branches.filter((b) => b.ref.startsWith('refs/heads/')))
+  ]);
 
-  return { branches, commits, ownerByHash };
+  const branchesWithWarnings = branches.map((b) => ({ ...b, ...branchWarnings.get(b.name) }));
+
+  return { branches: branchesWithWarnings, commits, ownerByHash };
 }
 
 module.exports = {
@@ -136,6 +202,7 @@ module.exports = {
   readBranches,
   readCommits,
   readCommitFiles,
+  readBranchWarnings,
   readFirstParentDistances,
   loadRepository
 };
