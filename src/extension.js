@@ -56,6 +56,10 @@ async function openGitRail(context) {
 
   panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.type === 'refresh') await refreshPanel();
+    if (message?.type === 'loadMore') {
+      currentPanel.maxCommits = (currentPanel.maxCommits || 300) + (currentPanel.loadMoreStep || 300);
+      await refreshPanel();
+    }
     if (message?.type === 'copyHash' && message.hash) {
       await vscode.env.clipboard.writeText(message.hash);
       vscode.window.setStatusBarMessage(`Git Rail: copied ${message.hash.slice(0, 8)}`, 1800);
@@ -72,15 +76,20 @@ async function refreshPanel() {
 
   try {
     const config = vscode.workspace.getConfiguration('gitRail', folder.uri);
+    const defaultMaxCommits = config.get('maxCommits', 300);
+    const maxCommits = currentPanel.maxCommits || defaultMaxCommits;
     const repository = await loadRepository(folder.uri.fsPath, {
-      maxCommits: config.get('maxCommits', 300),
+      maxCommits,
       includeRemoteBranches: config.get('includeRemoteBranches', false),
       includeLocalBranches: config.get('includeLocalBranches', true)
     });
+    currentPanel.maxCommits = maxCommits;
+    currentPanel.loadMoreStep = defaultMaxCommits;
+    const hasMore = repository.commits.length >= maxCommits;
     const layout = buildLayout(repository, {
       hideEmptyBranches: config.get('hideEmptyBranches', true)
     });
-    panel.webview.html = renderHtml(folder.name, layout, repository.branches);
+    panel.webview.html = renderHtml(folder.name, layout, repository.branches, hasMore);
   } catch (error) {
     panel.webview.html = errorHtml(error instanceof Error ? error.message : String(error));
   }
@@ -103,8 +112,8 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function renderHtml(repoName, layout, branches) {
-  const data = JSON.stringify({ ...layout, branches }).replaceAll('<', '\\u003c');
+function renderHtml(repoName, layout, branches, hasMore) {
+  const data = JSON.stringify({ ...layout, branches, hasMore: Boolean(hasMore) }).replaceAll('<', '\\u003c');
   return `<!doctype html>
 <html>
 <head>
@@ -148,6 +157,8 @@ function renderHtml(repoName, layout, branches) {
   .dim { opacity:.16 !important; }
   .focused { opacity:1 !important; }
   .empty { padding:30px; color:var(--vscode-descriptionForeground); }
+  .loadMore { position:absolute; left:0; display:flex; align-items:center; justify-content:center; }
+  .loadMore button:disabled { opacity:.6; cursor:default; }
 </style>
 </head>
 <body>
@@ -156,7 +167,7 @@ function renderHtml(repoName, layout, branches) {
 <script>
 const vscode = acquireVsCodeApi();
 const model = ${data};
-const laneW = 60, rowH = 38, headerH = 110, graphPadding = 36, detailsW = 700;
+const laneW = 60, rowH = 38, headerH = 110, graphPadding = 36, detailsW = 700, loadMoreH = 44;
 const canvas = document.getElementById('canvas');
 const branchMap = new Map(model.branches.map(b => [b.name, b]));
 let focusedLane = null;
@@ -164,8 +175,9 @@ let focusedLane = null;
 const width = Math.max(500, model.lanes.length * laneW + detailsW + graphPadding * 2);
 const graphWidth = model.lanes.length * laneW + graphPadding * 2;
 const bodyHeight = Math.max(rowH, model.rows.length * rowH);
+const footerH = model.hasMore ? loadMoreH : 0;
 canvas.style.width = width + 'px';
-canvas.style.height = (headerH + bodyHeight) + 'px';
+canvas.style.height = (headerH + bodyHeight + footerH) + 'px';
 
 const header = document.createElement('div');
 header.className = 'laneHeader';
@@ -291,6 +303,24 @@ model.rows.forEach(row => {
   commitEls.push({ el, row, node, details });
 });
 
+let loadMoreEl;
+if (model.hasMore) {
+  loadMoreEl = document.createElement('div');
+  loadMoreEl.className = 'loadMore';
+  loadMoreEl.style.top = (headerH + bodyHeight) + 'px';
+  loadMoreEl.style.width = width + 'px';
+  loadMoreEl.style.height = loadMoreH + 'px';
+  const loadMoreBtn = document.createElement('button');
+  loadMoreBtn.textContent = 'Load more commits';
+  loadMoreBtn.onclick = () => {
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = 'Loading…';
+    vscode.postMessage({ type: 'loadMore' });
+  };
+  loadMoreEl.appendChild(loadMoreBtn);
+  canvas.appendChild(loadMoreEl);
+}
+
 function parseFilterTokens(str) {
   const tokens = [];
   const re = /(author|message|commit)\\s*:\\s*(?:"([^"]*)"|'([^']*)'|(\\S+))|"([^"]*)"|'([^']*)'|(\\S+)/gi;
@@ -409,9 +439,14 @@ function applyFilter() {
   svg.setAttribute('width', currentGraphWidth);
 
   const newBodyHeight = compact ? Math.max(rowH, visibleCount * rowH) : bodyHeight;
-  canvas.style.height = (headerH + newBodyHeight) + 'px';
+  canvas.style.height = (headerH + newBodyHeight + footerH) + 'px';
   svg.setAttribute('height', newBodyHeight);
   railEls.forEach(line => line.setAttribute('y2', newBodyHeight));
+
+  if (loadMoreEl) {
+    loadMoreEl.style.top = (headerH + newBodyHeight) + 'px';
+    loadMoreEl.style.width = currentWidth + 'px';
+  }
 
   edgeEls.forEach(({ path, edge }) => {
     if (!compact) {
