@@ -126,6 +126,10 @@ function renderHtml(repoName, layout, branches) {
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
   .laneTitle.history { opacity:.65; font-style:italic; }
   .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
+  .commitPopover { position:fixed; z-index:20; max-width:360px; padding:7px 10px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; display:none; }
+  .commitPopover .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); }
+  .commitPopover .subject { display:block; margin:4px 0; color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); white-space:normal; word-break:break-word; }
+  .commitPopover .meta { color:var(--vscode-descriptionForeground); }
   .searchBar { position:absolute; top:50%; transform:translateY(-50%); display:flex; align-items:center; gap:10px; }
   .search { flex:1 1 auto; box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
   .search:focus { outline:1px solid var(--vscode-focusBorder); }
@@ -251,6 +255,10 @@ model.edges.forEach(edge => {
   edgeEls.push({ path, edge });
 });
 
+const commitPopover = document.createElement('div');
+commitPopover.className = 'commitPopover';
+document.body.appendChild(commitPopover);
+
 const commitEls = [];
 model.rows.forEach(row => {
   const el = document.createElement('div');
@@ -258,13 +266,22 @@ model.rows.forEach(row => {
   el.style.left = '0'; el.style.top = (headerH + row.row * rowH) + 'px'; el.style.width = width + 'px';
   el.dataset.lane = row.lane;
 
+  const date = new Date(row.timestamp).toLocaleString(undefined, {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+
   const node = document.createElement('span');
   node.className = 'node'; node.style.left = laneX(row.laneIndex) + 'px';
+  node.onmouseenter = () => {
+    commitPopover.innerHTML = '<span class="hash">' + row.shortHash + '</span><span class="subject">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
+    commitPopover.style.display = 'block';
+    const rect = node.getBoundingClientRect();
+    commitPopover.style.left = (rect.right + 10) + 'px';
+    commitPopover.style.top = rect.top + 'px';
+  };
+  node.onmouseleave = () => { commitPopover.style.display = 'none'; };
   el.appendChild(node);
 
   const details = document.createElement('div');
   details.className = 'details'; details.style.marginLeft = (graphWidth + 8) + 'px';
-  const date = new Date(row.timestamp).toLocaleString(undefined, {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
   details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span><span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
   details.querySelector('.hash').onclick = () => vscode.postMessage({type:'copyHash', hash:row.hash});
   el.appendChild(details);
