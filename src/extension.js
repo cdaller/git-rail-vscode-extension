@@ -169,7 +169,7 @@ canvas.style.height = (headerH + bodyHeight) + 'px';
 
 const header = document.createElement('div');
 header.className = 'laneHeader';
-header.style.width = graphWidth + 'px';
+header.style.width = width + 'px';
 canvas.appendChild(header);
 
 function laneX(index) { return graphPadding + index * laneW + laneW / 2; }
