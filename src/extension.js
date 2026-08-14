@@ -140,7 +140,8 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
   .commitPopover .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); }
   .commitPopover .subject { display:block; margin:4px 0; color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); white-space:normal; word-break:break-word; }
   .commitPopover .meta { color:var(--vscode-descriptionForeground); }
-  .searchBar { position:absolute; top:50%; transform:translateY(-50%); display:flex; align-items:center; gap:10px; }
+  .searchBar { position:absolute; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; align-items:stretch; gap:6px; }
+  .compactToggles { display:flex; align-items:center; gap:10px; }
   .search { flex:1 1 auto; box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
   .search:focus { outline:1px solid var(--vscode-focusBorder); }
   .compactToggle { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--vscode-descriptionForeground); white-space:nowrap; cursor:pointer; }
@@ -241,6 +242,10 @@ search.className = 'search';
 search.placeholder = 'Filter (words OR-combined, "quoted" = exact); or author:x message:x commit:x';
 searchBar.appendChild(search);
 
+const compactToggles = document.createElement('div');
+compactToggles.className = 'compactToggles';
+searchBar.appendChild(compactToggles);
+
 function createCompactToggle(labelText, title) {
   const toggle = document.createElement('label');
   toggle.className = 'compactToggle';
@@ -249,7 +254,7 @@ function createCompactToggle(labelText, title) {
   toggle.appendChild(checkbox);
   toggle.appendChild(document.createTextNode(labelText));
   toggle.title = title;
-  searchBar.appendChild(toggle);
+  compactToggles.appendChild(toggle);
   return checkbox;
 }
 const compactRowsCheckbox = createCompactToggle('Compact rows', 'Remove non-matching commit rows instead of just hiding them');
@@ -507,6 +512,13 @@ function applyFilter() {
 search.addEventListener('input', applyFilter);
 compactRowsCheckbox.addEventListener('change', applyFilter);
 compactBranchesCheckbox.addEventListener('change', applyFilter);
+window.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    search.focus();
+    search.select();
+  }
+});
 
 function applyFocus() {
   document.querySelectorAll('[data-lane], [data-from-lane]').forEach(el => el.classList.remove('dim','focused'));
