@@ -219,11 +219,17 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .search:focus { outline:1px solid var(--vscode-focusBorder); }
   .compactToggle { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--vscode-descriptionForeground); white-space:nowrap; cursor:pointer; }
   svg { position:absolute; left:0; top:var(--header-h); overflow:visible; pointer-events:none; }
-  .rail { stroke:var(--vscode-editorIndentGuide-background); stroke-width:2; }
+  .rail { stroke:var(--vscode-editorIndentGuide-background); stroke-width:2; pointer-events:stroke; cursor:pointer; }
+  .traceDim { opacity:.15 !important; }
+  .traceSpine { stroke:var(--vscode-textLink-foreground) !important; stroke-width:3 !important; opacity:1 !important; }
+  .traceMerged { stroke:var(--vscode-gitDecoration-addedResourceForeground, #2ea043) !important; stroke-width:3 !important; opacity:1 !important; }
+  .node.traceSpine { background:var(--vscode-textLink-foreground); box-shadow:0 0 0 2px var(--vscode-textLink-foreground); }
+  .node.traceMerged { background:var(--vscode-gitDecoration-addedResourceForeground, #2ea043); box-shadow:0 0 0 2px var(--vscode-gitDecoration-addedResourceForeground, #2ea043); }
+  .node.traceBoundary { box-shadow:0 0 0 3px var(--vscode-editorWarning-foreground, #cca700); }
   .edge { fill:none; stroke:var(--vscode-editorIndentGuide-activeBackground); stroke-width:2; opacity:.55; pointer-events:stroke; cursor:pointer; }
   .edge.merge { stroke-dasharray:5 4; opacity:.9; }
   .commit { position:absolute; height:var(--row-h); display:flex; align-items:center; border-bottom:1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent); pointer-events:none; }
-  .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); pointer-events:auto; }
+  .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); pointer-events:auto; cursor:pointer; }
   .commit.mergeCommit .node { width:14px; height:14px; transform:translate(-7px,-7px) rotate(45deg); border-radius:2px; }
   .details { margin-left:28px; width:650px; display:flex; gap:9px; align-items:baseline; white-space:nowrap; overflow:hidden; }
   .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); cursor:pointer; pointer-events:auto; }
@@ -244,6 +250,7 @@ const vscode = acquireVsCodeApi();
 const model = ${data};
 const rowH = 38, graphPadding = 36, detailsW = 700, loadMoreH = 44;
 const canvas = document.getElementById('canvas');
+const viewport = document.querySelector('.viewport');
 const branchMap = new Map(model.branches.map(b => [b.name, b]));
 document.documentElement.style.setProperty('--lane-title-max-w', model.maxBranchLabelWidth + 'px');
 const selectedLanes = new Set();
@@ -308,8 +315,11 @@ model.lanes.forEach((lane, i) => {
   el.dataset.lane = lane;
   el.onclick = () => {
     if (selectedLanes.has(lane)) selectedLanes.delete(lane); else selectedLanes.add(lane);
+    activeTrace = null;
+    applyTrace();
     applyFocus();
     applyFilter();
+    saveUiState();
   };
   el.onmouseenter = () => {
     branchPopover.textContent = lane === 'history'
@@ -379,11 +389,103 @@ model.lanes.forEach((lane, i) => {
   line.setAttribute('x1', laneX(i)); line.setAttribute('x2', laneX(i));
   line.setAttribute('y1', 0); line.setAttribute('y2', bodyHeight);
   line.setAttribute('class', 'rail'); line.dataset.lane = lane;
+  line.onclick = (e) => {
+    e.stopPropagation();
+    const target = nearestRowInLane(i, e.clientY);
+    if (target) toggleTrace(target);
+  };
   svg.appendChild(line);
   railEls.push(line);
 });
 
 const rowByHash = new Map(model.rows.map(r => [r.hash, r]));
+
+// Traces a branch's own history back to where it diverged from already-known history,
+// even if the branch itself no longer exists (its commits just sit in the 'history' lane).
+// A parent commit is a "boundary" once it belongs to a different, still-existing branch —
+// i.e. shared ancestry this branch doesn't exclusively own. Anything else (same lane, or
+// still unowned 'history') is treated as part of this branch's own story and expanded further.
+function traceBranch(startRow) {
+  const startLane = startRow.lane;
+  const isBoundary = (r) => r.lane !== 'history' && r.lane !== startLane;
+
+  const spineHashes = new Set([startRow.hash]);
+  let cur = startRow;
+  while (cur.parents[0]) {
+    const p = rowByHash.get(cur.parents[0]);
+    if (!p) break;
+    spineHashes.add(p.hash);
+    if (isBoundary(p)) break;
+    cur = p;
+  }
+
+  const ancestryHashes = new Set([startRow.hash]);
+  const boundaryHashes = new Set();
+  const queue = [startRow];
+  const visited = new Set([startRow.hash]);
+  while (queue.length) {
+    const row = queue.shift();
+    for (const parentHash of row.parents) {
+      if (visited.has(parentHash)) continue;
+      visited.add(parentHash);
+      const p = rowByHash.get(parentHash);
+      if (!p) continue;
+      ancestryHashes.add(p.hash);
+      if (isBoundary(p)) { boundaryHashes.add(p.hash); continue; }
+      queue.push(p);
+    }
+  }
+
+  return { startHash: startRow.hash, spineHashes, ancestryHashes, boundaryHashes };
+}
+
+let activeTrace = null;
+function applyTrace() {
+  commitEls.forEach(({ el, row, node }) => {
+    el.classList.remove('traceDim');
+    node.classList.remove('traceSpine', 'traceMerged', 'traceBoundary');
+    if (!activeTrace) return;
+    if (!activeTrace.ancestryHashes.has(row.hash)) { el.classList.add('traceDim'); return; }
+    if (activeTrace.boundaryHashes.has(row.hash)) node.classList.add('traceBoundary');
+    else if (activeTrace.spineHashes.has(row.hash)) node.classList.add('traceSpine');
+    else node.classList.add('traceMerged');
+  });
+  edgeEls.forEach(({ path, edge }) => {
+    path.classList.remove('traceDim', 'traceSpine', 'traceMerged');
+    if (!activeTrace) return;
+    const bothTraced = activeTrace.ancestryHashes.has(edge.childHash) && activeTrace.ancestryHashes.has(edge.parentHash);
+    if (!bothTraced) { path.classList.add('traceDim'); return; }
+    const isSpine = !edge.mergeParent && activeTrace.spineHashes.has(edge.childHash) && activeTrace.spineHashes.has(edge.parentHash);
+    path.classList.add(isSpine ? 'traceSpine' : 'traceMerged');
+  });
+}
+function toggleTrace(row) {
+  if (activeTrace && activeTrace.startHash === row.hash) {
+    activeTrace = null;
+  } else {
+    selectedLanes.clear();
+    applyFocus();
+    activeTrace = traceBranch(row);
+  }
+  applyTrace();
+  saveUiState();
+}
+function topRowOfLane(laneIndex) {
+  return model.rows.reduce((best, r) => (r.laneIndex === laneIndex && (!best || r.row < best.row) ? r : best), null);
+}
+// The shared 'history' lane can hold several unrelated deleted-branch chains stacked in one
+// column, so tracing always from the topmost commit would silently ignore the others. Using
+// the commit nearest the actual click lets each chain be traced by clicking near it.
+function nearestRowInLane(laneIndex, clientY) {
+  let best = null, bestDist = Infinity;
+  commitEls.forEach(({ el, row }) => {
+    if (row.laneIndex !== laneIndex || el.style.display === 'none') return;
+    const rect = el.getBoundingClientRect();
+    const dist = Math.abs(rect.top + rect.height / 2 - clientY);
+    if (dist < bestDist) { bestDist = dist; best = row; }
+  });
+  return best || topRowOfLane(laneIndex);
+}
 
 const edgePopover = document.createElement('div');
 edgePopover.className = 'edgePopover';
@@ -516,6 +618,7 @@ model.rows.forEach(row => {
     commitPopover.style.top = rect.top + 'px';
   };
   node.onmouseleave = () => { commitPopover.style.display = 'none'; };
+  node.onclick = (e) => { e.stopPropagation(); toggleTrace(row); };
   el.appendChild(node);
 
   const details = document.createElement('div');
@@ -709,15 +812,36 @@ function applyFilter() {
     path.setAttribute('d', edgePathD(currentLaneX(edge.fromLane), currentRowY(edge.fromRow), currentLaneX(edge.toLane), currentRowY(edge.toRow)));
   });
 }
-search.addEventListener('input', applyFilter);
-compactRowsCheckbox.addEventListener('change', applyFilter);
-compactBranchesCheckbox.addEventListener('change', applyFilter);
+// Loading more commits replaces the whole webview (a fresh DOM/script each time), which would
+// otherwise silently drop the search text, compact toggles, branch selection/trace, and scroll
+// position. vscode.setState/getState persists across that reload for the same panel.
+function saveUiState() {
+  vscode.setState({
+    search: search.value,
+    compactRows: compactRowsCheckbox.checked,
+    compactBranches: compactBranchesCheckbox.checked,
+    selectedLanes: [...selectedLanes],
+    traceHash: activeTrace ? activeTrace.startHash : null,
+    scrollTop: viewport.scrollTop,
+    scrollLeft: viewport.scrollLeft
+  });
+}
+
+search.addEventListener('input', () => { applyFilter(); saveUiState(); });
+compactRowsCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
+compactBranchesCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     search.focus();
     search.select();
   }
+});
+let scrollSaveScheduled = false;
+viewport.addEventListener('scroll', () => {
+  if (scrollSaveScheduled) return;
+  scrollSaveScheduled = true;
+  requestAnimationFrame(() => { scrollSaveScheduled = false; saveUiState(); });
 });
 
 function applyFocus() {
@@ -735,9 +859,25 @@ function applyFocus() {
 function escapeHtmlClient(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function escapeForAttr(s) { return escapeHtmlClient(s).replaceAll('"','&quot;'); }
 
-document.getElementById('clear').onclick = () => { selectedLanes.clear(); applyFocus(); applyFilter(); };
+document.getElementById('clear').onclick = () => { selectedLanes.clear(); activeTrace = null; applyFocus(); applyFilter(); applyTrace(); saveUiState(); };
 document.getElementById('refresh').onclick = () => vscode.postMessage({type:'refresh'});
 if (!model.rows.length) canvas.insertAdjacentHTML('beforeend','<div class="empty">No commits found.</div>');
+
+const savedUiState = vscode.getState();
+if (savedUiState) {
+  if (savedUiState.search) search.value = savedUiState.search;
+  compactRowsCheckbox.checked = Boolean(savedUiState.compactRows);
+  compactBranchesCheckbox.checked = Boolean(savedUiState.compactBranches);
+  (savedUiState.selectedLanes || []).forEach((lane) => selectedLanes.add(lane));
+  applyFilter();
+  applyFocus();
+  if (savedUiState.traceHash) {
+    const tracedRow = rowByHash.get(savedUiState.traceHash);
+    if (tracedRow) { activeTrace = traceBranch(tracedRow); applyTrace(); }
+  }
+  if (savedUiState.scrollTop != null) viewport.scrollTop = savedUiState.scrollTop;
+  if (savedUiState.scrollLeft != null) viewport.scrollLeft = savedUiState.scrollLeft;
+}
 </script>
 </body></html>`;
 }
