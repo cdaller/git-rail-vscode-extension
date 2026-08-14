@@ -136,10 +136,12 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
   .laneTitle.history { opacity:.65; font-style:italic; }
   .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
-  .commitPopover { position:fixed; z-index:20; max-width:360px; padding:7px 10px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; display:none; }
-  .commitPopover .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); }
-  .commitPopover .subject { display:block; margin:4px 0; color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); white-space:normal; word-break:break-word; }
-  .commitPopover .meta { color:var(--vscode-descriptionForeground); }
+  .commitPopover, .edgePopover { position:fixed; z-index:20; max-width:360px; padding:7px 10px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; display:none; }
+  .commitPopover .hash, .edgePopover .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); }
+  .commitPopover .subject, .edgePopover .subject { display:block; margin:4px 0; color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); white-space:normal; word-break:break-word; }
+  .commitPopover .meta, .edgePopover .meta { color:var(--vscode-descriptionForeground); }
+  .edgePopover .row { margin:2px 0; }
+  .edgePopover .lane { color:var(--vscode-textLink-foreground); }
   .searchBar { position:absolute; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; align-items:stretch; gap:6px; }
   .compactToggles { display:flex; align-items:center; gap:10px; }
   .search { flex:1 1 auto; box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
@@ -147,13 +149,13 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
   .compactToggle { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--vscode-descriptionForeground); white-space:nowrap; cursor:pointer; }
   svg { position:absolute; left:0; top:var(--header-h); overflow:visible; pointer-events:none; }
   .rail { stroke:var(--vscode-editorIndentGuide-background); stroke-width:2; }
-  .edge { fill:none; stroke:var(--vscode-editorIndentGuide-activeBackground); stroke-width:2; opacity:.55; }
+  .edge { fill:none; stroke:var(--vscode-editorIndentGuide-activeBackground); stroke-width:2; opacity:.55; pointer-events:stroke; cursor:pointer; }
   .edge.merge { stroke-dasharray:5 4; opacity:.9; }
-  .commit { position:absolute; height:var(--row-h); display:flex; align-items:center; border-bottom:1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent); }
-  .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); }
+  .commit { position:absolute; height:var(--row-h); display:flex; align-items:center; border-bottom:1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent); pointer-events:none; }
+  .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); pointer-events:auto; }
   .commit.mergeCommit .node { width:14px; height:14px; transform:translate(-7px,-7px) rotate(45deg); border-radius:2px; }
   .details { margin-left:28px; width:650px; display:flex; gap:9px; align-items:baseline; white-space:nowrap; overflow:hidden; }
-  .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); cursor:pointer; }
+  .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); cursor:pointer; pointer-events:auto; }
   .subject { overflow:hidden; text-overflow:ellipsis; }
   .meta { color:var(--vscode-descriptionForeground); font-size:12px; }
   .dim { opacity:.16 !important; }
@@ -283,6 +285,12 @@ model.lanes.forEach((lane, i) => {
   railEls.push(line);
 });
 
+const rowByHash = new Map(model.rows.map(r => [r.hash, r]));
+
+const edgePopover = document.createElement('div');
+edgePopover.className = 'edgePopover';
+document.body.appendChild(edgePopover);
+
 const edgeEls = [];
 model.edges.forEach(edge => {
   const x1 = laneX(edge.fromLane), y1 = rowY(edge.fromRow);
@@ -292,9 +300,24 @@ model.edges.forEach(edge => {
   path.setAttribute('class', 'edge' + (edge.mergeParent ? ' merge' : ''));
   path.dataset.fromLane = model.lanes[edge.fromLane];
   path.dataset.toLane = model.lanes[edge.toLane];
+  path.onclick = (e) => {
+    e.stopPropagation();
+    const child = rowByHash.get(edge.childHash);
+    const parent = rowByHash.get(edge.parentHash);
+    edgePopover.innerHTML =
+      '<div class="row">Source branch: <span class="lane">' + escapeHtmlClient(model.lanes[edge.toLane]) + '</span></div>' +
+      '<div class="row">Target branch: <span class="lane">' + escapeHtmlClient(model.lanes[edge.fromLane]) + '</span></div>' +
+      '<span class="hash">' + parent.shortHash + '</span><span class="subject">' + escapeHtmlClient(parent.subject) + '</span><span class="meta">' + escapeHtmlClient(parent.author) + '</span>' +
+      (edge.mergeParent ? '<div class="row meta">merge parent</div>' : '') +
+      '<span class="hash">' + child.shortHash + '</span><span class="subject">' + escapeHtmlClient(child.subject) + '</span><span class="meta">' + escapeHtmlClient(child.author) + '</span>';
+    edgePopover.style.display = 'block';
+    edgePopover.style.left = (e.clientX + 12) + 'px';
+    edgePopover.style.top = (e.clientY + 12) + 'px';
+  };
   svg.appendChild(path);
   edgeEls.push({ path, edge });
 });
+document.addEventListener('click', () => { edgePopover.style.display = 'none'; });
 
 const commitPopover = document.createElement('div');
 commitPopover.className = 'commitPopover';
