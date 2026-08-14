@@ -39,10 +39,20 @@
           "maximum": 5000,
           "description": "Maximum number of commits shown in the branch map."
         },
+        "gitRail.includeLocalBranches": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include local branches as separate rails."
+        },
         "gitRail.includeRemoteBranches": {
           "type": "boolean",
           "default": false,
           "description": "Include remote-tracking branches as separate rails."
+        },
+        "gitRail.hideEmptyBranches": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide branches that have no commits of their own (e.g. fully merged branches)."
         }
       }
     }

@@ -58,3 +58,10 @@ test/            Node built-in tests
 ## License
 
 MIT
+
+## TODO
+
+* filter branches
+* allow multiselect on branches. add a checkbox to hide all non selected branches completely. rails to non shown branches should be summarized in on "hidden branch" rail
+* when search filter is applied, optionally remove the lines that do not match the filter expression (configurable)
+* add "load more commits" button at the end

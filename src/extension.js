@@ -74,9 +74,12 @@ async function refreshPanel() {
     const config = vscode.workspace.getConfiguration('gitRail', folder.uri);
     const repository = await loadRepository(folder.uri.fsPath, {
       maxCommits: config.get('maxCommits', 300),
-      includeRemoteBranches: config.get('includeRemoteBranches', false)
+      includeRemoteBranches: config.get('includeRemoteBranches', false),
+      includeLocalBranches: config.get('includeLocalBranches', true)
     });
-    const layout = buildLayout(repository);
+    const layout = buildLayout(repository, {
+      hideEmptyBranches: config.get('hideEmptyBranches', true)
+    });
     panel.webview.html = renderHtml(folder.name, layout, repository.branches);
   } catch (error) {
     panel.webview.html = errorHtml(error instanceof Error ? error.message : String(error));
@@ -122,6 +125,7 @@ function renderHtml(repoName, layout, branches) {
   .laneTitle { position:absolute; bottom:10px; max-width:130px; padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); }
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
   .laneTitle.history { opacity:.65; font-style:italic; }
+  .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
   .search { position:absolute; top:50%; transform:translateY(-50%); box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
   .search:focus { outline:1px solid var(--vscode-focusBorder); }
   .commit.filteredOut { display:none; }
@@ -166,14 +170,26 @@ canvas.appendChild(header);
 function laneX(index) { return graphPadding + index * laneW + laneW / 2; }
 function rowY(index) { return index * rowH + rowH / 2; }
 
+const branchPopover = document.createElement('div');
+branchPopover.className = 'branchPopover';
+document.body.appendChild(branchPopover);
+
 model.lanes.forEach((lane, i) => {
   const el = document.createElement('div');
   el.className = 'laneTitle' + (branchMap.get(lane)?.current ? ' current' : '') + (lane === 'history' ? ' history' : '');
   el.textContent = lane;
-  el.title = lane === 'history' ? 'Commits not assigned to the first-parent chain of a current branch' : lane;
+  el.title = lane === 'history' ? 'Commits not assigned to the first-parent chain of a current branch' : '';
   el.style.left = laneX(i) + 'px';
   el.dataset.lane = lane;
   el.onclick = () => { focusedLane = focusedLane === lane ? null : lane; applyFocus(); };
+  el.onmouseenter = () => {
+    branchPopover.textContent = lane === 'history' ? 'history' : lane;
+    branchPopover.style.display = 'block';
+    const rect = el.getBoundingClientRect();
+    branchPopover.style.left = rect.left + 'px';
+    branchPopover.style.top = (rect.bottom + 6) + 'px';
+  };
+  el.onmouseleave = () => { branchPopover.style.display = 'none'; };
   header.appendChild(el);
 });
 

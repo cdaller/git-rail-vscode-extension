@@ -1,8 +1,15 @@
 'use strict';
 
-function buildLayout(repository) {
+function buildLayout(repository, options = {}) {
+  const { hideEmptyBranches = true } = options;
   const { branches, commits, ownerByHash } = repository;
-  const branchNames = branches.map((b) => b.name);
+  let branchNames = branches.map((b) => b.name);
+
+  if (hideEmptyBranches) {
+    const ownedBranches = new Set(commits.map((c) => ownerByHash.get(c.hash)));
+    branchNames = branchNames.filter((name) => ownedBranches.has(name));
+  }
+
   const known = new Set(branchNames);
 
   // A synthetic lane keeps history readable when a commit is not on the first-parent

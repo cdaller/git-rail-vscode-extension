@@ -23,9 +23,11 @@ async function isGitRepository(cwd) {
   }
 }
 
-async function readBranches(cwd, includeRemoteBranches) {
-  const refs = ['refs/heads'];
+async function readBranches(cwd, includeRemoteBranches, includeLocalBranches = true) {
+  const refs = [];
+  if (includeLocalBranches) refs.push('refs/heads');
   if (includeRemoteBranches) refs.push('refs/remotes');
+  if (!refs.length) return [];
 
   const format = '%(refname)%00%(refname:short)%00%(objectname)%00%(HEAD)';
   const out = await runGit(cwd, ['for-each-ref', `--format=${format}`, ...refs]);
@@ -37,7 +39,7 @@ async function readBranches(cwd, includeRemoteBranches) {
       const [ref, name, tip, head] = line.split('\0');
       return { ref, name, tip, current: head === '*' };
     })
-    .filter((b) => !b.name.endsWith('/HEAD'))
+    .filter((b) => !b.ref.endsWith('/HEAD'))
     .sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
 }
 
@@ -98,9 +100,10 @@ async function readFirstParentDistances(cwd, branches, visibleHashes) {
 async function loadRepository(cwd, options = {}) {
   const maxCommits = options.maxCommits || 300;
   const includeRemoteBranches = Boolean(options.includeRemoteBranches);
+  const includeLocalBranches = options.includeLocalBranches !== false;
 
   const [branches, commits] = await Promise.all([
-    readBranches(cwd, includeRemoteBranches),
+    readBranches(cwd, includeRemoteBranches, includeLocalBranches),
     readCommits(cwd, maxCommits)
   ]);
 
