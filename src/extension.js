@@ -126,9 +126,10 @@ function renderHtml(repoName, layout, branches) {
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
   .laneTitle.history { opacity:.65; font-style:italic; }
   .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
-  .search { position:absolute; top:50%; transform:translateY(-50%); box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
+  .searchBar { position:absolute; top:50%; transform:translateY(-50%); display:flex; align-items:center; gap:10px; }
+  .search { flex:1 1 auto; box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
   .search:focus { outline:1px solid var(--vscode-focusBorder); }
-  .commit.filteredOut { display:none; }
+  .compactToggle { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--vscode-descriptionForeground); white-space:nowrap; cursor:pointer; }
   svg { position:absolute; left:0; top:var(--header-h); overflow:visible; pointer-events:none; }
   .rail { stroke:var(--vscode-editorIndentGuide-background); stroke-width:2; }
   .edge { fill:none; stroke:var(--vscode-editorIndentGuide-activeBackground); stroke-width:2; opacity:.55; }
@@ -193,13 +194,26 @@ model.lanes.forEach((lane, i) => {
   header.appendChild(el);
 });
 
+const searchBar = document.createElement('div');
+searchBar.className = 'searchBar';
+searchBar.style.left = (graphWidth + 8) + 'px';
+searchBar.style.width = (detailsW - 16) + 'px';
+header.appendChild(searchBar);
+
 const search = document.createElement('input');
 search.type = 'search';
 search.className = 'search';
 search.placeholder = 'Filter by hash, message, author (words are OR-combined, "quoted" = exact match)';
-search.style.left = (graphWidth + 8) + 'px';
-search.style.width = (detailsW - 16) + 'px';
-header.appendChild(search);
+searchBar.appendChild(search);
+
+const compactToggle = document.createElement('label');
+compactToggle.className = 'compactToggle';
+const compactCheckbox = document.createElement('input');
+compactCheckbox.type = 'checkbox';
+compactToggle.appendChild(compactCheckbox);
+compactToggle.appendChild(document.createTextNode('Compact'));
+compactToggle.title = 'Remove non-matching rows instead of just hiding them';
+searchBar.appendChild(compactToggle);
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = document.createElementNS(NS, 'svg');
@@ -207,24 +221,34 @@ svg.setAttribute('width', graphWidth);
 svg.setAttribute('height', bodyHeight);
 canvas.appendChild(svg);
 
+function edgePathD(x1, y1, x2, y2) {
+  const dy = Math.max(14, Math.min(50, Math.abs(y2 - y1) * .3));
+  return x1 === x2
+    ? ('M ' + x1 + ' ' + y1 + ' L ' + x2 + ' ' + y2)
+    : ('M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + (y1 + dy) + ', ' + x2 + ' ' + (y2 - dy) + ', ' + x2 + ' ' + y2);
+}
+
+const railEls = [];
 model.lanes.forEach((lane, i) => {
   const line = document.createElementNS(NS, 'line');
   line.setAttribute('x1', laneX(i)); line.setAttribute('x2', laneX(i));
   line.setAttribute('y1', 0); line.setAttribute('y2', bodyHeight);
   line.setAttribute('class', 'rail'); line.dataset.lane = lane;
   svg.appendChild(line);
+  railEls.push(line);
 });
 
+const edgeEls = [];
 model.edges.forEach(edge => {
   const x1 = laneX(edge.fromLane), y1 = rowY(edge.fromRow);
   const x2 = laneX(edge.toLane), y2 = rowY(edge.toRow);
-  const dy = Math.max(14, Math.min(50, Math.abs(y2-y1) * .3));
   const path = document.createElementNS(NS, 'path');
-  path.setAttribute('d', x1 === x2 ? ('M ' + x1 + ' ' + y1 + ' L ' + x2 + ' ' + y2) : ('M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + (y1+dy) + ', ' + x2 + ' ' + (y2-dy) + ', ' + x2 + ' ' + y2));
+  path.setAttribute('d', edgePathD(x1, y1, x2, y2));
   path.setAttribute('class', 'edge' + (edge.mergeParent ? ' merge' : ''));
   path.dataset.fromLane = model.lanes[edge.fromLane];
   path.dataset.toLane = model.lanes[edge.toLane];
   svg.appendChild(path);
+  edgeEls.push({ path, edge });
 });
 
 const commitEls = [];
@@ -275,9 +299,45 @@ function rowMatchesFilter(row, tokens) {
 }
 function applyFilter() {
   const tokens = parseFilterTokens(search.value);
-  commitEls.forEach(({ el, row }) => el.classList.toggle('filteredOut', !rowMatchesFilter(row, tokens)));
+  const compact = compactCheckbox.checked && tokens.length > 0;
+
+  const compactRowIndex = new Map();
+  let visibleCount = 0;
+  commitEls.forEach(({ el, row }) => {
+    const matches = rowMatchesFilter(row, tokens);
+    el.style.display = matches ? '' : 'none';
+    if (!compact) {
+      el.style.top = (headerH + row.row * rowH) + 'px';
+    } else if (matches) {
+      el.style.top = (headerH + visibleCount * rowH) + 'px';
+      compactRowIndex.set(row.row, visibleCount);
+      visibleCount++;
+    }
+  });
+
+  const newBodyHeight = compact ? Math.max(rowH, visibleCount * rowH) : bodyHeight;
+  canvas.style.height = (headerH + newBodyHeight) + 'px';
+  svg.setAttribute('height', newBodyHeight);
+  railEls.forEach(line => line.setAttribute('y2', newBodyHeight));
+
+  edgeEls.forEach(({ path, edge }) => {
+    if (!compact) {
+      path.style.display = '';
+      path.setAttribute('d', edgePathD(laneX(edge.fromLane), rowY(edge.fromRow), laneX(edge.toLane), rowY(edge.toRow)));
+      return;
+    }
+    const fromIdx = compactRowIndex.get(edge.fromRow);
+    const toIdx = compactRowIndex.get(edge.toRow);
+    if (fromIdx === undefined || toIdx === undefined) {
+      path.style.display = 'none';
+      return;
+    }
+    path.style.display = '';
+    path.setAttribute('d', edgePathD(laneX(edge.fromLane), rowY(fromIdx), laneX(edge.toLane), rowY(toIdx)));
+  });
 }
 search.addEventListener('input', applyFilter);
+compactCheckbox.addEventListener('change', applyFilter);
 
 function applyFocus() {
   document.querySelectorAll('[data-lane], [data-from-lane]').forEach(el => el.classList.remove('dim','focused'));
