@@ -45,31 +45,33 @@ async function readBranches(cwd, includeRemoteBranches, includeLocalBranches = t
   // to "main") would otherwise show up as a second, redundant lane for the same branch.
   const localNames = new Set(all.filter((b) => b.ref.startsWith('refs/heads/')).map((b) => b.name));
 
-  // Local branches are flagged with a "has a remote" indicator even when remote lanes
-  // themselves aren't shown, so this is checked independently of includeRemoteBranches.
-  let remoteBranchNames;
+  // Local branches are flagged with a "has a remote" indicator (and the remote's full name)
+  // even when remote lanes themselves aren't shown, so this is checked independently of
+  // includeRemoteBranches.
+  let remoteRefs;
   if (includeRemoteBranches) {
-    remoteBranchNames = new Set(
-      all.filter((b) => b.ref.startsWith('refs/remotes/')).map((b) => b.name.split('/').slice(1).join('/'))
-    );
+    remoteRefs = all.filter((b) => b.ref.startsWith('refs/remotes/'));
   } else {
     const remoteOut = await runGit(cwd, ['for-each-ref', '--format=%(refname)%00%(refname:short)', 'refs/remotes']);
-    remoteBranchNames = new Set(
-      remoteOut
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('\0'))
-        .filter(([ref]) => !ref.endsWith('/HEAD'))
-        .map(([, name]) => name.split('/').slice(1).join('/'))
-    );
+    remoteRefs = remoteOut
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [ref, name] = line.split('\0');
+        return { ref, name };
+      })
+      .filter((b) => !b.ref.endsWith('/HEAD'));
   }
+  const remoteNameByBranch = new Map(remoteRefs.map((b) => [b.name.split('/').slice(1).join('/'), b.name]));
 
   const deduped = all
     .filter((b) => {
       if (!b.ref.startsWith('refs/remotes/')) return true;
       return !localNames.has(b.name.split('/').slice(1).join('/'));
     })
-    .map((b) => (b.ref.startsWith('refs/heads/') ? { ...b, hasRemote: remoteBranchNames.has(b.name) } : b));
+    .map((b) => (b.ref.startsWith('refs/heads/')
+      ? { ...b, hasRemote: remoteNameByBranch.has(b.name), remoteName: remoteNameByBranch.get(b.name) }
+      : b));
 
   return deduped.sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
 }
@@ -154,7 +156,9 @@ async function readBranchWarnings(cwd, localBranches) {
     } catch {
       // Ref can disappear during refresh; treat as not pushed.
     }
-    const notPushed = !upstream || track.includes('ahead');
+    const aheadMatch = /ahead (\d+)/.exec(track || '');
+    const ahead = aheadMatch ? Number(aheadMatch[1]) : 0;
+    const notPushed = !upstream;
 
     let unmerged = true;
     try {
@@ -171,7 +175,7 @@ async function readBranchWarnings(cwd, localBranches) {
       // A ref can disappear during refresh; assume unmerged so the warning stays visible.
     }
 
-    warnings.set(branch.name, { unmerged, notPushed, warn: unmerged || notPushed });
+    warnings.set(branch.name, { unmerged, notPushed, ahead, warn: unmerged || notPushed });
   }));
   return warnings;
 }
