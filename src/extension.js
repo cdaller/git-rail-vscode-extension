@@ -163,7 +163,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
 </style>
 </head>
 <body>
-<div class="toolbar"><strong>Git Rail — ${escapeHtml(repoName)}</strong><span class="hint">Click a rail to focus · click hash to copy</span><button id="clear">Clear focus</button><button id="refresh">Refresh</button></div>
+<div class="toolbar"><strong>Git Rail — ${escapeHtml(repoName)}</strong><span class="hint">Click branch labels to select (multiple allowed, compact hides the rest) · click hash to copy</span><button id="clear">Clear focus</button><button id="refresh">Refresh</button></div>
 <div class="viewport"><div id="canvas" class="canvas"></div></div>
 <script>
 const vscode = acquireVsCodeApi();
@@ -172,7 +172,7 @@ const rowH = 38, graphPadding = 36, detailsW = 700, loadMoreH = 44;
 const canvas = document.getElementById('canvas');
 const branchMap = new Map(model.branches.map(b => [b.name, b]));
 document.documentElement.style.setProperty('--lane-title-max-w', model.maxBranchLabelWidth + 'px');
-let focusedLane = null;
+const selectedLanes = new Set();
 
 const laneW = 60;
 const labelAngle = 35 * Math.PI / 180;
@@ -212,7 +212,11 @@ model.lanes.forEach((lane, i) => {
   el.title = lane === 'history' ? 'Commits not assigned to the first-parent chain of a current branch' : '';
   el.style.left = laneX(i) + 'px';
   el.dataset.lane = lane;
-  el.onclick = () => { focusedLane = focusedLane === lane ? null : lane; applyFocus(); };
+  el.onclick = () => {
+    if (selectedLanes.has(lane)) selectedLanes.delete(lane); else selectedLanes.add(lane);
+    applyFocus();
+    applyFilter();
+  };
   el.onmouseenter = () => {
     branchPopover.textContent = lane === 'history' ? 'history' : lane;
     branchPopover.style.display = 'block';
@@ -237,14 +241,19 @@ search.className = 'search';
 search.placeholder = 'Filter (words OR-combined, "quoted" = exact); or author:x message:x commit:x';
 searchBar.appendChild(search);
 
-const compactToggle = document.createElement('label');
-compactToggle.className = 'compactToggle';
-const compactCheckbox = document.createElement('input');
-compactCheckbox.type = 'checkbox';
-compactToggle.appendChild(compactCheckbox);
-compactToggle.appendChild(document.createTextNode('Compact'));
-compactToggle.title = 'Remove non-matching rows instead of just hiding them';
-searchBar.appendChild(compactToggle);
+function createCompactToggle(labelText, title) {
+  const toggle = document.createElement('label');
+  toggle.className = 'compactToggle';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  toggle.appendChild(checkbox);
+  toggle.appendChild(document.createTextNode(labelText));
+  toggle.title = title;
+  searchBar.appendChild(toggle);
+  return checkbox;
+}
+const compactRowsCheckbox = createCompactToggle('Compact rows', 'Remove non-matching commit rows instead of just hiding them');
+const compactBranchesCheckbox = createCompactToggle('Compact branches', 'Hide branch lanes with no visible commits instead of just leaving them empty');
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = document.createElementNS(NS, 'svg');
@@ -397,37 +406,52 @@ function rowMatchesFilter(row, tokens) {
 }
 function applyFilter() {
   const tokens = parseFilterTokens(search.value);
-  const compact = compactCheckbox.checked && tokens.length > 0;
+  const hasActiveFilter = tokens.length > 0 || selectedLanes.size > 0;
+  const compactRows = compactRowsCheckbox.checked && hasActiveFilter;
+  const compactBranches = compactBranchesCheckbox.checked && hasActiveFilter;
 
+  function rowVisible(row) {
+    const textMatch = rowMatchesFilter(row, tokens);
+    if (!compactBranches) return textMatch;
+    return textMatch && (!selectedLanes.size || selectedLanes.has(row.lane));
+  }
+
+  const visibleByRow = new Map();
   const compactRowIndex = new Map();
   const visibleLanes = new Set();
   let visibleCount = 0;
   commitEls.forEach(({ row }) => {
-    const matches = rowMatchesFilter(row, tokens);
-    if (compact && matches) {
-      compactRowIndex.set(row.row, visibleCount);
-      visibleCount++;
+    const visible = rowVisible(row);
+    visibleByRow.set(row.row, visible);
+    if (visible) {
       visibleLanes.add(row.laneIndex);
+      if (compactRows) {
+        compactRowIndex.set(row.row, visibleCount);
+        visibleCount++;
+      }
     }
   });
 
   const compactLaneIndex = new Map();
-  if (compact) {
+  if (compactBranches) {
     model.lanes.forEach((lane, i) => {
       if (visibleLanes.has(i)) compactLaneIndex.set(i, compactLaneIndex.size);
     });
   }
   function currentLaneX(origIndex) {
-    return compact ? laneX(compactLaneIndex.get(origIndex)) : laneX(origIndex);
+    return compactBranches ? laneX(compactLaneIndex.get(origIndex)) : laneX(origIndex);
+  }
+  function currentRowY(rowIndex) {
+    return compactRows ? rowY(compactRowIndex.get(rowIndex)) : rowY(rowIndex);
   }
 
-  const currentGraphWidth = compact
+  const currentGraphWidth = compactBranches
     ? Math.max(laneW, compactLaneIndex.size * laneW + graphPadding * 2)
     : graphWidth;
   const currentWidth = Math.max(500, currentGraphWidth + detailsW);
 
   model.lanes.forEach((lane, i) => {
-    const show = !compact || visibleLanes.has(i);
+    const show = !compactBranches || visibleLanes.has(i);
     laneTitleEls[i].style.display = show ? '' : 'none';
     railEls[i].style.display = show ? '' : 'none';
     if (show) {
@@ -438,15 +462,15 @@ function applyFilter() {
   });
 
   commitEls.forEach(({ el, row, node, details }) => {
-    const matches = rowMatchesFilter(row, tokens);
-    el.style.display = matches ? '' : 'none';
+    const visible = visibleByRow.get(row.row);
+    el.style.display = visible ? '' : 'none';
     el.style.width = currentWidth + 'px';
-    if (!compact) {
+    if (!compactRows) {
       el.style.top = (headerH + row.row * rowH) + 'px';
-    } else if (matches) {
+    } else if (visible) {
       el.style.top = (headerH + compactRowIndex.get(row.row) * rowH) + 'px';
     }
-    if (matches) node.style.left = currentLaneX(row.laneIndex) + 'px';
+    if (visible) node.style.left = currentLaneX(row.laneIndex) + 'px';
     details.style.marginLeft = (currentGraphWidth + 8) + 'px';
   });
 
@@ -455,7 +479,7 @@ function applyFilter() {
   searchBar.style.left = (currentGraphWidth + 8) + 'px';
   svg.setAttribute('width', currentGraphWidth);
 
-  const newBodyHeight = compact ? Math.max(rowH, visibleCount * rowH) : bodyHeight;
+  const newBodyHeight = compactRows ? Math.max(rowH, visibleCount * rowH) : bodyHeight;
   canvas.style.height = (headerH + newBodyHeight + footerH) + 'px';
   svg.setAttribute('height', newBodyHeight);
   railEls.forEach(line => line.setAttribute('y2', newBodyHeight));
@@ -465,41 +489,41 @@ function applyFilter() {
     loadMoreEl.style.width = currentWidth + 'px';
   }
 
+  const anyCompact = compactRows || compactBranches;
   edgeEls.forEach(({ path, edge }) => {
-    if (!compact) {
+    if (!anyCompact) {
       path.style.display = '';
       path.setAttribute('d', edgePathD(laneX(edge.fromLane), rowY(edge.fromRow), laneX(edge.toLane), rowY(edge.toRow)));
       return;
     }
-    const fromIdx = compactRowIndex.get(edge.fromRow);
-    const toIdx = compactRowIndex.get(edge.toRow);
-    if (fromIdx === undefined || toIdx === undefined) {
+    if (!visibleByRow.get(edge.fromRow) || !visibleByRow.get(edge.toRow)) {
       path.style.display = 'none';
       return;
     }
     path.style.display = '';
-    path.setAttribute('d', edgePathD(currentLaneX(edge.fromLane), rowY(fromIdx), currentLaneX(edge.toLane), rowY(toIdx)));
+    path.setAttribute('d', edgePathD(currentLaneX(edge.fromLane), currentRowY(edge.fromRow), currentLaneX(edge.toLane), currentRowY(edge.toRow)));
   });
 }
 search.addEventListener('input', applyFilter);
-compactCheckbox.addEventListener('change', applyFilter);
+compactRowsCheckbox.addEventListener('change', applyFilter);
+compactBranchesCheckbox.addEventListener('change', applyFilter);
 
 function applyFocus() {
   document.querySelectorAll('[data-lane], [data-from-lane]').forEach(el => el.classList.remove('dim','focused'));
-  if (!focusedLane) return;
+  if (!selectedLanes.size) return;
   document.querySelectorAll('.commit, .rail, .laneTitle').forEach(el => {
-    el.classList.toggle('focused', el.dataset.lane === focusedLane);
-    el.classList.toggle('dim', el.dataset.lane !== focusedLane);
+    el.classList.toggle('focused', selectedLanes.has(el.dataset.lane));
+    el.classList.toggle('dim', !selectedLanes.has(el.dataset.lane));
   });
   document.querySelectorAll('.edge').forEach(el => {
-    const relevant = el.dataset.fromLane === focusedLane || el.dataset.toLane === focusedLane;
+    const relevant = selectedLanes.has(el.dataset.fromLane) || selectedLanes.has(el.dataset.toLane);
     el.classList.toggle('focused', relevant); el.classList.toggle('dim', !relevant);
   });
 }
 function escapeHtmlClient(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function escapeForAttr(s) { return escapeHtmlClient(s).replaceAll('"','&quot;'); }
 
-document.getElementById('clear').onclick = () => { focusedLane = null; applyFocus(); };
+document.getElementById('clear').onclick = () => { selectedLanes.clear(); applyFocus(); applyFilter(); };
 document.getElementById('refresh').onclick = () => vscode.postMessage({type:'refresh'});
 if (!model.rows.length) canvas.insertAdjacentHTML('beforeend','<div class="empty">No commits found.</div>');
 </script>
