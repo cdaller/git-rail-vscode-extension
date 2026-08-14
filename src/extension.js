@@ -89,7 +89,8 @@ async function refreshPanel() {
     const layout = buildLayout(repository, {
       hideEmptyBranches: config.get('hideEmptyBranches', true)
     });
-    panel.webview.html = renderHtml(folder.name, layout, repository.branches, hasMore);
+    const maxBranchLabelWidth = config.get('maxBranchLabelWidth', 130);
+    panel.webview.html = renderHtml(folder.name, layout, repository.branches, hasMore, maxBranchLabelWidth);
   } catch (error) {
     panel.webview.html = errorHtml(error instanceof Error ? error.message : String(error));
   }
@@ -112,8 +113,8 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function renderHtml(repoName, layout, branches, hasMore) {
-  const data = JSON.stringify({ ...layout, branches, hasMore: Boolean(hasMore) }).replaceAll('<', '\\u003c');
+function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth) {
+  const data = JSON.stringify({ ...layout, branches, hasMore: Boolean(hasMore), maxBranchLabelWidth: maxBranchLabelWidth || 130 }).replaceAll('<', '\\u003c');
   return `<!doctype html>
 <html>
 <head>
@@ -131,7 +132,7 @@ function renderHtml(repoName, layout, branches, hasMore) {
   .viewport { overflow:auto; height:calc(100vh - 43px); }
   .canvas { position:relative; min-width:max-content; }
   .laneHeader { position:sticky; top:0; z-index:8; height:var(--header-h); border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editor-background); }
-  .laneTitle { position:absolute; bottom:10px; max-width:130px; padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); }
+  .laneTitle { position:absolute; bottom:10px; max-width:var(--lane-title-max-w, 130px); padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); }
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
   .laneTitle.history { opacity:.65; font-style:italic; }
   .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
@@ -167,13 +168,25 @@ function renderHtml(repoName, layout, branches, hasMore) {
 <script>
 const vscode = acquireVsCodeApi();
 const model = ${data};
-const laneW = 60, rowH = 38, headerH = 110, graphPadding = 36, detailsW = 700, loadMoreH = 44;
+const rowH = 38, graphPadding = 36, detailsW = 700, loadMoreH = 44;
 const canvas = document.getElementById('canvas');
 const branchMap = new Map(model.branches.map(b => [b.name, b]));
+document.documentElement.style.setProperty('--lane-title-max-w', model.maxBranchLabelWidth + 'px');
 let focusedLane = null;
 
-const width = Math.max(500, model.lanes.length * laneW + detailsW + graphPadding * 2);
+const laneW = 60;
+const labelAngle = 35 * Math.PI / 180;
+const measureCtx = document.createElement('canvas').getContext('2d');
+measureCtx.font = '11px ' + getComputedStyle(document.body).fontFamily;
+const maxLabelWidth = model.lanes.reduce((max, lane) => {
+  const naturalWidth = measureCtx.measureText(lane).width + 14; // matches .laneTitle's 3px+7px horizontal padding
+  return Math.max(max, Math.min(naturalWidth, model.maxBranchLabelWidth));
+}, 40);
+const headerH = Math.max(70, Math.round(maxLabelWidth * Math.sin(labelAngle)) + 36);
+document.documentElement.style.setProperty('--header-h', headerH + 'px');
+
 const graphWidth = model.lanes.length * laneW + graphPadding * 2;
+const width = Math.max(500, graphWidth + detailsW);
 const bodyHeight = Math.max(rowH, model.rows.length * rowH);
 const footerH = model.hasMore ? loadMoreH : 0;
 canvas.style.width = width + 'px';

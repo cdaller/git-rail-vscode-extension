@@ -53,6 +53,13 @@
           "type": "boolean",
           "default": true,
           "description": "Hide branches that have no commits of their own (e.g. fully merged branches)."
+        },
+        "gitRail.maxBranchLabelWidth": {
+          "type": "number",
+          "default": 130,
+          "minimum": 40,
+          "maximum": 600,
+          "description": "Maximum width in pixels of a branch label before it is truncated with an ellipsis."
         }
       }
     }
