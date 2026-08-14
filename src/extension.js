@@ -122,6 +122,9 @@ function renderHtml(repoName, layout, branches) {
   .laneTitle { position:absolute; bottom:10px; max-width:130px; padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); }
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
   .laneTitle.history { opacity:.65; font-style:italic; }
+  .search { position:absolute; top:50%; transform:translateY(-50%); box-sizing:border-box; padding:6px 10px; border:1px solid var(--vscode-panel-border); border-radius:4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); font-family:inherit; font-size:13px; }
+  .search:focus { outline:1px solid var(--vscode-focusBorder); }
+  .commit.filteredOut { display:none; }
   svg { position:absolute; left:0; top:var(--header-h); overflow:visible; pointer-events:none; }
   .rail { stroke:var(--vscode-editorIndentGuide-background); stroke-width:2; }
   .edge { fill:none; stroke:var(--vscode-editorIndentGuide-activeBackground); stroke-width:2; opacity:.55; }
@@ -174,6 +177,14 @@ model.lanes.forEach((lane, i) => {
   header.appendChild(el);
 });
 
+const search = document.createElement('input');
+search.type = 'search';
+search.className = 'search';
+search.placeholder = 'Filter by hash, message, author (words are OR-combined, "quoted" = exact match)';
+search.style.left = (graphWidth + 8) + 'px';
+search.style.width = (detailsW - 16) + 'px';
+header.appendChild(search);
+
 const NS = 'http://www.w3.org/2000/svg';
 const svg = document.createElementNS(NS, 'svg');
 svg.setAttribute('width', graphWidth);
@@ -200,6 +211,7 @@ model.edges.forEach(edge => {
   svg.appendChild(path);
 });
 
+const commitEls = [];
 model.rows.forEach(row => {
   const el = document.createElement('div');
   el.className = 'commit' + (row.parents.length > 1 ? ' mergeCommit' : '');
@@ -217,7 +229,39 @@ model.rows.forEach(row => {
   details.querySelector('.hash').onclick = () => vscode.postMessage({type:'copyHash', hash:row.hash});
   el.appendChild(details);
   canvas.appendChild(el);
+  commitEls.push({ el, row });
 });
+
+function parseFilterTokens(str) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|([^ ]+)/g;
+  let m;
+  while ((m = re.exec(str))) {
+    if (m[1] !== undefined) tokens.push({ text: m[1], exact: true });
+    else if (m[2] !== undefined) tokens.push({ text: m[2], exact: true });
+    else tokens.push({ text: m[3], exact: false });
+  }
+  return tokens.filter(t => t.text.length);
+}
+function wordsOf(s) { return s.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean); }
+function rowMatchesFilter(row, tokens) {
+  if (!tokens.length) return true;
+  const hash = row.hash.toLowerCase();
+  const subject = row.subject.toLowerCase();
+  const author = row.author.toLowerCase();
+  const subjectWords = wordsOf(row.subject);
+  const authorWords = wordsOf(row.author);
+  return tokens.some(({ text, exact }) => {
+    const t = text.toLowerCase();
+    if (exact) return hash === t || subjectWords.includes(t) || authorWords.includes(t);
+    return hash.includes(t) || subject.includes(t) || author.includes(t);
+  });
+}
+function applyFilter() {
+  const tokens = parseFilterTokens(search.value);
+  commitEls.forEach(({ el, row }) => el.classList.toggle('filteredOut', !rowMatchesFilter(row, tokens)));
+}
+search.addEventListener('input', applyFilter);
 
 function applyFocus() {
   document.querySelectorAll('[data-lane], [data-from-lane]').forEach(el => el.classList.remove('dim','focused'));
