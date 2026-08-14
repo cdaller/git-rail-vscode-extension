@@ -183,12 +183,12 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .laneTitle { position:absolute; bottom:10px; max-width:var(--lane-title-max-w, 130px); padding:3px 7px; border-radius:5px; cursor:pointer; overflow:hidden; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); display:flex; align-items:center; gap:3px; }
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); font-weight:700; background:var(--vscode-statusBarItem-prominentBackground, var(--vscode-badge-background)); }
   .laneTitle.history { opacity:.65; font-style:italic; }
-  .laneTitle .warnIcon, .laneTitle .currentMark, .laneTitle .remoteIcon, .laneTitle .aheadIcon { flex:0 0 auto; }
+  .laneTitle .warnIcon, .laneTitle .currentMark, .laneTitle .remoteIcon, .laneTitle .aheadIcon, .laneTitle .behindIcon { flex:0 0 auto; }
   .laneTitle .warnIcon { color:var(--vscode-editorWarning-foreground, #cca700); font-weight:800; }
-  .laneTitle .aheadIcon { color:inherit; font-weight:700; white-space:nowrap; }
+  .laneTitle .aheadIcon, .laneTitle .behindIcon { color:inherit; font-weight:700; white-space:nowrap; }
   .laneTitle .remoteIcon { color:inherit; font-size:12px; }
   .laneTitle .labelText { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .branchPopover { position:fixed; z-index:20; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:nowrap; display:none; }
+  .branchPopover { position:fixed; z-index:20; max-width:360px; padding:5px 9px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; white-space:normal; display:none; }
   .commitPopover, .edgePopover { position:fixed; z-index:20; max-width:360px; padding:7px 10px; border-radius:5px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; display:none; }
   .commitPopover .hash, .edgePopover .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); }
   .commitPopover .subject, .edgePopover .subject { display:block; margin:4px 0; color:var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); white-space:normal; word-break:break-word; }
@@ -230,6 +230,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .edge.merge { stroke-dasharray:5 4; opacity:.9; }
   .commit { position:absolute; height:var(--row-h); display:flex; align-items:center; border-bottom:1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent); pointer-events:none; }
   .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); pointer-events:auto; cursor:pointer; }
+  .node.sharedBase { outline:2px dashed var(--vscode-descriptionForeground); outline-offset:2px; }
   .commit.mergeCommit .node { width:14px; height:14px; transform:translate(-7px,-7px) rotate(45deg); border-radius:2px; }
   .details { margin-left:28px; width:650px; display:flex; gap:9px; align-items:baseline; white-space:nowrap; overflow:hidden; }
   .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); cursor:pointer; pointer-events:auto; }
@@ -291,6 +292,7 @@ model.lanes.forEach((lane, i) => {
   const isCurrent = Boolean(branch?.current);
   const hasRemote = Boolean(branch?.hasRemote);
   const ahead = Number(branch?.ahead) || 0;
+  const behind = Number(branch?.behind) || 0;
   const warnReasons = [];
   if (branch?.unmerged) warnReasons.push('not merged into another branch');
   if (branch?.notPushed) warnReasons.push('no upstream branch');
@@ -301,14 +303,16 @@ model.lanes.forEach((lane, i) => {
   el.innerHTML = (warn ? '<span class="warnIcon">!</span>' : '') +
     (hasRemote ? '<span class="remoteIcon codicon codicon-remote"></span>' : '') +
     (ahead ? '<span class="aheadIcon">⇡' + ahead + '</span>' : '') +
+    (behind ? '<span class="behindIcon">⇣' + behind + '</span>' : '') +
     (isCurrent ? '<span class="currentMark">✓</span>' : '') +
     '<span class="labelText">' + escapeHtmlClient(lane) + '</span>';
-  el.title = lane === 'history'
-    ? 'Commits not assigned to the first-parent chain of a current branch'
+  const hoverText = lane === 'history'
+    ? 'history — commits not assigned to the first-parent chain of a current branch'
     : [
-        isCurrent ? 'currently checked out' : '',
+        lane + (isCurrent ? ' (currently checked out)' : ''),
         hasRemote ? 'remote: ' + branch.remoteName : '',
         ahead ? ahead + ' commit(s) ahead of remote' : '',
+        behind ? behind + ' commit(s) behind remote' : '',
         warnReasons.join(' · ')
       ].filter(Boolean).join(' — ');
   el.style.left = laneX(i) + 'px';
@@ -322,14 +326,7 @@ model.lanes.forEach((lane, i) => {
     saveUiState();
   };
   el.onmouseenter = () => {
-    branchPopover.textContent = lane === 'history'
-      ? 'history'
-      : [
-          lane + (isCurrent ? ' (current)' : ''),
-          hasRemote ? '→ ' + branch.remoteName : '',
-          ahead ? '⇡' + ahead : '',
-          warn ? '⚠ ' + warnReasons.join(', ') : ''
-        ].filter(Boolean).join(' ');
+    branchPopover.textContent = hoverText;
     branchPopover.style.display = 'block';
     const rect = el.getBoundingClientRect();
     branchPopover.style.left = rect.left + 'px';
@@ -544,9 +541,11 @@ document.addEventListener('click', () => { commitDetailsPanel.style.display = 'n
 let openCommitHash = null;
 function statusLabel(status) { return (status || '').charAt(0); }
 function commitDetailsHeaderHtml(row, date) {
+  const isSharedBase = row.branches && row.branches.length > 1;
   return '<span class="hash">' + row.shortHash + '</span>' +
     '<span class="subject">' + escapeHtmlClient(row.subject) + '</span>' +
-    '<span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
+    '<span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>' +
+    (isSharedBase ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '');
 }
 function renderCommitFiles(row, date, msg) {
   if (msg.hash !== openCommitHash) return;
@@ -608,10 +607,13 @@ model.rows.forEach(row => {
 
   const date = new Date(row.timestamp).toLocaleString(undefined, {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 
+  const isSharedBase = row.branches && row.branches.length > 1;
   const node = document.createElement('span');
-  node.className = 'node'; node.style.left = laneX(row.laneIndex) + 'px';
+  node.className = 'node' + (isSharedBase ? ' sharedBase' : '');
+  node.style.left = laneX(row.laneIndex) + 'px';
   node.onmouseenter = () => {
-    commitPopover.innerHTML = '<span class="hash">' + row.shortHash + '</span><span class="subject">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
+    commitPopover.innerHTML = '<span class="hash">' + row.shortHash + '</span><span class="subject">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>' +
+      (isSharedBase ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '');
     commitPopover.style.display = 'block';
     const rect = node.getBoundingClientRect();
     commitPopover.style.left = (rect.right + 10) + 'px';

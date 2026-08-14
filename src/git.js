@@ -119,6 +119,9 @@ async function readCommitFiles(cwd, hash) {
 async function readFirstParentDistances(cwd, branches, visibleHashes) {
   const visible = new Set(visibleHashes);
   const candidates = new Map();
+  // Every branch whose first-parent chain reaches a commit, not just the winning "owner" —
+  // lets the UI point out when a commit is genuinely the shared base of several branches.
+  const branchesByHash = new Map();
 
   await Promise.all(branches.map(async (branch, branchIndex) => {
     try {
@@ -133,6 +136,8 @@ async function readFirstParentDistances(cwd, branches, visibleHashes) {
               (score[0] === previous.score[0] && score[1] < previous.score[1])) {
             candidates.set(hash, { branch: branch.name, score });
           }
+          if (!branchesByHash.has(hash)) branchesByHash.set(hash, new Set());
+          branchesByHash.get(hash).add(branch.name);
         }
         distance += 1;
       }
@@ -141,7 +146,18 @@ async function readFirstParentDistances(cwd, branches, visibleHashes) {
     }
   }));
 
-  return new Map([...candidates].map(([hash, value]) => [hash, value.branch]));
+  // A commit shared with main/master is usually just main/master's own history that a
+  // shorter-lived branch happens to sit closer to — prefer main/master as the owner over
+  // the plain "closest tip" heuristic so the commit renders on the long-lived branch.
+  for (const [hash, names] of branchesByHash) {
+    if (names.has('main')) candidates.set(hash, { branch: 'main', score: [-1, -1] });
+    else if (names.has('master')) candidates.set(hash, { branch: 'master', score: [-1, -1] });
+  }
+
+  return {
+    ownerByHash: new Map([...candidates].map(([hash, value]) => [hash, value.branch])),
+    branchesByHash: new Map([...branchesByHash].map(([hash, names]) => [hash, [...names]]))
+  };
 }
 
 async function readBranchWarnings(cwd, localBranches) {
@@ -158,6 +174,8 @@ async function readBranchWarnings(cwd, localBranches) {
     }
     const aheadMatch = /ahead (\d+)/.exec(track || '');
     const ahead = aheadMatch ? Number(aheadMatch[1]) : 0;
+    const behindMatch = /behind (\d+)/.exec(track || '');
+    const behind = behindMatch ? Number(behindMatch[1]) : 0;
     const notPushed = !upstream;
 
     let unmerged = true;
@@ -175,7 +193,7 @@ async function readBranchWarnings(cwd, localBranches) {
       // A ref can disappear during refresh; assume unmerged so the warning stays visible.
     }
 
-    warnings.set(branch.name, { unmerged, notPushed, ahead, warn: unmerged || notPushed });
+    warnings.set(branch.name, { unmerged, notPushed, ahead, behind, warn: unmerged || notPushed });
   }));
   return warnings;
 }
@@ -190,14 +208,14 @@ async function loadRepository(cwd, options = {}) {
     readCommits(cwd, maxCommits)
   ]);
 
-  const [ownerByHash, branchWarnings] = await Promise.all([
+  const [{ ownerByHash, branchesByHash }, branchWarnings] = await Promise.all([
     readFirstParentDistances(cwd, branches, commits.map((c) => c.hash)),
     readBranchWarnings(cwd, branches.filter((b) => b.ref.startsWith('refs/heads/')))
   ]);
 
   const branchesWithWarnings = branches.map((b) => ({ ...b, ...branchWarnings.get(b.name) }));
 
-  return { branches: branchesWithWarnings, commits, ownerByHash };
+  return { branches: branchesWithWarnings, commits, ownerByHash, branchesByHash };
 }
 
 module.exports = {

@@ -2,7 +2,7 @@
 
 function buildLayout(repository, options = {}) {
   const { hideEmptyBranches = true } = options;
-  const { branches, commits, ownerByHash } = repository;
+  const { branches, commits, ownerByHash, branchesByHash = new Map() } = repository;
   let branchNames = branches.map((b) => b.name);
 
   if (hideEmptyBranches) {
@@ -21,7 +21,8 @@ function buildLayout(repository, options = {}) {
   const rows = commits.map((commit, row) => {
     const owner = ownerByHash.get(commit.hash);
     const lane = known.has(owner) ? owner : 'history';
-    return { ...commit, row, lane, laneIndex: laneIndex.get(lane) };
+    const branchesForCommit = (branchesByHash.get(commit.hash) || [lane]).filter((name) => known.has(name));
+    return { ...commit, row, lane, laneIndex: laneIndex.get(lane), branches: branchesForCommit.length ? branchesForCommit : [lane] };
   });
 
   const rowByHash = new Map(rows.map((row) => [row.hash, row]));
