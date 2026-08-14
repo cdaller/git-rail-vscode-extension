@@ -108,7 +108,7 @@ function renderHtml(repoName, layout, branches) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <style>
-  :root { --row-h: 38px; --lane-w: 60px; --header-h: 100px; }
+  :root { --row-h: 38px; --lane-w: 60px; --header-h: 110px; }
   * { box-sizing: border-box; }
   body { margin:0; color:var(--vscode-foreground); background:var(--vscode-editor-background); font-family:var(--vscode-font-family); }
   .toolbar { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:10px; padding:9px 12px; border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editor-background); }
@@ -119,7 +119,7 @@ function renderHtml(repoName, layout, branches) {
   .viewport { overflow:auto; height:calc(100vh - 43px); }
   .canvas { position:relative; min-width:max-content; }
   .laneHeader { position:sticky; top:0; z-index:8; height:var(--header-h); border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editor-background); }
-  .laneTitle { position:absolute; bottom:8px; max-width:140px; padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:right bottom; transform:rotate(40deg); }
+  .laneTitle { position:absolute; bottom:10px; max-width:130px; padding:3px 7px; border-radius:5px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:var(--vscode-badge-background); color:var(--vscode-badge-foreground); font-size:11px; transform-origin:left bottom; transform:rotate(-35deg); }
   .laneTitle.current { outline:2px solid var(--vscode-focusBorder); }
   .laneTitle.history { opacity:.65; font-style:italic; }
   svg { position:absolute; left:0; top:var(--header-h); overflow:visible; pointer-events:none; }
@@ -144,7 +144,7 @@ function renderHtml(repoName, layout, branches) {
 <script>
 const vscode = acquireVsCodeApi();
 const model = ${data};
-const laneW = 60, rowH = 38, headerH = 100, graphPadding = 36, detailsW = 700;
+const laneW = 60, rowH = 38, headerH = 110, graphPadding = 36, detailsW = 700;
 const canvas = document.getElementById('canvas');
 const branchMap = new Map(model.branches.map(b => [b.name, b]));
 let focusedLane = null;
@@ -168,7 +168,7 @@ model.lanes.forEach((lane, i) => {
   el.className = 'laneTitle' + (branchMap.get(lane)?.current ? ' current' : '') + (lane === 'history' ? ' history' : '');
   el.textContent = lane;
   el.title = lane === 'history' ? 'Commits not assigned to the first-parent chain of a current branch' : lane;
-  el.style.right = (graphWidth - laneX(i)) + 'px';
+  el.style.left = laneX(i) + 'px';
   el.dataset.lane = lane;
   el.onclick = () => { focusedLane = focusedLane === lane ? null : lane; applyFocus(); };
   header.appendChild(el);
