@@ -246,7 +246,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
 </style>
 </head>
 <body>
-<div class="toolbar"><strong>Git Rail — ${escapeHtml(repoName)}</strong><span class="hint">Click branch labels to select (multiple allowed, compact hides the rest) · click hash to copy</span><button id="clear">Clear focus</button><button id="refresh">Refresh</button></div>
+<div class="toolbar"><strong>Git Rail — ${escapeHtml(repoName)}</strong><span class="hint">Click branch labels to select (multiple allowed, compact hides the rest) · click a commit or lane to trace its ancestry and select the branches that contributed to it · click hash to copy</span><button id="clear">Clear selection</button><button id="refresh">Refresh</button></div>
 <div class="viewport"><div id="canvas" class="canvas"></div></div>
 <script>
 const vscode = acquireVsCodeApi();
