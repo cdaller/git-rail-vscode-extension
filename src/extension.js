@@ -220,6 +220,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .compactToggle { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--vscode-descriptionForeground); white-space:nowrap; cursor:pointer; }
   svg { position:absolute; left:0; top:var(--header-h); overflow:visible; pointer-events:none; }
   .rail { stroke:var(--vscode-editorIndentGuide-background); stroke-width:2; pointer-events:stroke; cursor:pointer; }
+  .railFaint { stroke-dasharray:2 4; opacity:.4; }
   .traceDim { opacity:.15 !important; }
   .traceSpine { stroke:var(--vscode-textLink-foreground) !important; stroke-width:3 !important; opacity:1 !important; }
   .traceMerged { stroke:var(--vscode-gitDecoration-addedResourceForeground, #2ea043) !important; stroke-width:3 !important; opacity:1 !important; }
@@ -384,19 +385,54 @@ function edgePathD(x1, y1, x2, y2) {
     : ('M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + (y1 + dy) + ', ' + x2 + ' ' + (y2 - dy) + ', ' + x2 + ' ' + y2);
 }
 
+// A lane's rail is drawn full-height for layout stability, but a branch only has commits of
+// its own between its topmost (most recent) and bottommost (oldest) row - e.g. a stale branch
+// whose tip sits well below the top of the list, or a branch whose history ends partway down
+// once it merges into shared ancestry. Those leading/trailing stretches are rendered
+// faint/dashed so scrolling shows at a glance which branches actually contribute a commit at
+// that point.
+const topRowByLane = new Array(model.lanes.length).fill(null);
+const bottomRowByLane = new Array(model.lanes.length).fill(null);
+model.rows.forEach((row) => {
+  if (topRowByLane[row.laneIndex] === null || row.row < topRowByLane[row.laneIndex]) topRowByLane[row.laneIndex] = row.row;
+  if (bottomRowByLane[row.laneIndex] === null || row.row > bottomRowByLane[row.laneIndex]) bottomRowByLane[row.laneIndex] = row.row;
+});
+
 const railEls = [];
+const railFaintTopEls = [];
+const railFaintBottomEls = [];
 model.lanes.forEach((lane, i) => {
-  const line = document.createElementNS(NS, 'line');
-  line.setAttribute('x1', laneX(i)); line.setAttribute('x2', laneX(i));
-  line.setAttribute('y1', 0); line.setAttribute('y2', bodyHeight);
-  line.setAttribute('class', 'rail'); line.dataset.lane = lane;
-  line.onclick = (e) => {
+  const topY = topRowByLane[i] === null ? 0 : rowY(topRowByLane[i]);
+  const bottomY = bottomRowByLane[i] === null ? bodyHeight : rowY(bottomRowByLane[i]);
+  const onRailClick = (e) => {
     e.stopPropagation();
     const target = nearestRowInLane(i, e.clientY);
     if (target) toggleTrace(target);
   };
+
+  const faintTop = document.createElementNS(NS, 'line');
+  faintTop.setAttribute('x1', laneX(i)); faintTop.setAttribute('x2', laneX(i));
+  faintTop.setAttribute('y1', 0); faintTop.setAttribute('y2', topY);
+  faintTop.setAttribute('class', 'rail railFaint'); faintTop.dataset.lane = lane;
+  faintTop.onclick = onRailClick;
+  svg.appendChild(faintTop);
+  railFaintTopEls.push(faintTop);
+
+  const line = document.createElementNS(NS, 'line');
+  line.setAttribute('x1', laneX(i)); line.setAttribute('x2', laneX(i));
+  line.setAttribute('y1', topY); line.setAttribute('y2', bottomY);
+  line.setAttribute('class', 'rail'); line.dataset.lane = lane;
+  line.onclick = onRailClick;
   svg.appendChild(line);
   railEls.push(line);
+
+  const faintBottom = document.createElementNS(NS, 'line');
+  faintBottom.setAttribute('x1', laneX(i)); faintBottom.setAttribute('x2', laneX(i));
+  faintBottom.setAttribute('y1', bottomY); faintBottom.setAttribute('y2', bodyHeight);
+  faintBottom.setAttribute('class', 'rail railFaint'); faintBottom.dataset.lane = lane;
+  faintBottom.onclick = onRailClick;
+  svg.appendChild(faintBottom);
+  railFaintBottomEls.push(faintBottom);
 });
 
 const rowByHash = new Map(model.rows.map(r => [r.hash, r]));
@@ -814,12 +850,19 @@ function applyFilter() {
 
   model.lanes.forEach((lane, i) => {
     const show = !compactBranches || visibleLanes.has(i);
+    const showFaint = show && !compactRows && topRowByLane[i] !== null;
     laneTitleEls[i].style.display = show ? '' : 'none';
     railEls[i].style.display = show ? '' : 'none';
+    railFaintTopEls[i].style.display = showFaint ? '' : 'none';
+    railFaintBottomEls[i].style.display = showFaint ? '' : 'none';
     if (show) {
       laneTitleEls[i].style.left = currentLaneX(i) + 'px';
       railEls[i].setAttribute('x1', currentLaneX(i));
       railEls[i].setAttribute('x2', currentLaneX(i));
+      railFaintTopEls[i].setAttribute('x1', currentLaneX(i));
+      railFaintTopEls[i].setAttribute('x2', currentLaneX(i));
+      railFaintBottomEls[i].setAttribute('x1', currentLaneX(i));
+      railFaintBottomEls[i].setAttribute('x2', currentLaneX(i));
     }
   });
 
@@ -844,7 +887,20 @@ function applyFilter() {
   const newBodyHeight = compactRows ? Math.max(rowH, visibleCount * rowH) : bodyHeight;
   canvas.style.height = (headerH + newBodyHeight + footerH) + 'px';
   svg.setAttribute('height', newBodyHeight);
-  railEls.forEach(line => line.setAttribute('y2', newBodyHeight));
+  railEls.forEach((line, i) => {
+    const hasOwnRows = !compactRows && topRowByLane[i] !== null;
+    line.setAttribute('y1', hasOwnRows ? rowY(topRowByLane[i]) : 0);
+    line.setAttribute('y2', hasOwnRows ? rowY(bottomRowByLane[i]) : newBodyHeight);
+  });
+  railFaintTopEls.forEach((line, i) => {
+    if (topRowByLane[i] !== null) line.setAttribute('y2', rowY(topRowByLane[i]));
+  });
+  railFaintBottomEls.forEach((line, i) => {
+    if (bottomRowByLane[i] !== null) {
+      line.setAttribute('y1', rowY(bottomRowByLane[i]));
+      line.setAttribute('y2', newBodyHeight);
+    }
+  });
 
   if (loadMoreEl) {
     loadMoreEl.style.top = (headerH + newBodyHeight) + 'px';
