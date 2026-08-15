@@ -456,14 +456,19 @@ function applyTrace() {
   });
 }
 function toggleTrace(row) {
+  selectedLanes.clear();
   if (activeTrace && activeTrace.startHash === row.hash) {
     activeTrace = null;
   } else {
-    selectedLanes.clear();
-    applyFocus();
     activeTrace = traceBranch(row);
+    for (const hash of activeTrace.ancestryHashes) {
+      const r = rowByHash.get(hash);
+      if (r) r.branches.forEach((branch) => selectedLanes.add(branch));
+    }
   }
   applyTrace();
+  applyFocus();
+  applyFilter();
   saveUiState();
 }
 function topRowOfLane(laneIndex) {
