@@ -769,8 +769,8 @@ function rowMatchesFilter(row, tokens) {
 function applyFilter() {
   const tokens = parseFilterTokens(search.value);
   const hasActiveFilter = tokens.length > 0 || selectedLanes.size > 0;
-  const compactRows = compactRowsCheckbox.checked && hasActiveFilter;
   const compactBranches = compactBranchesCheckbox.checked && hasActiveFilter;
+  const compactRows = compactBranches || (compactRowsCheckbox.checked && hasActiveFilter);
 
   function rowVisible(row) {
     const textMatch = rowMatchesFilter(row, tokens);
