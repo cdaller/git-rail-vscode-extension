@@ -401,22 +401,17 @@ model.lanes.forEach((lane, i) => {
 
 const rowByHash = new Map(model.rows.map(r => [r.hash, r]));
 
-// Traces a branch's own history back to where it diverged from already-known history,
-// even if the branch itself no longer exists (its commits just sit in the 'history' lane).
-// A parent commit is a "boundary" once it belongs to a different, still-existing branch —
-// i.e. shared ancestry this branch doesn't exclusively own. Anything else (same lane, or
-// still unowned 'history') is treated as part of this branch's own story and expanded further.
+// Traces a commit's full ancestry back to the root, regardless of whether that history is
+// still exclusively owned by this branch. Commits flagged as sharedBoundary (layout.js -
+// the topmost commit of a run of ancestry shared with other still-existing branches) are
+// marked as boundaries for styling, but traversal keeps going past them either way.
 function traceBranch(startRow) {
-  const startLane = startRow.lane;
-  const isBoundary = (r) => r.lane !== 'history' && r.lane !== startLane;
-
   const spineHashes = new Set([startRow.hash]);
   let cur = startRow;
   while (cur.parents[0]) {
     const p = rowByHash.get(cur.parents[0]);
     if (!p) break;
     spineHashes.add(p.hash);
-    if (isBoundary(p)) break;
     cur = p;
   }
 
@@ -432,7 +427,7 @@ function traceBranch(startRow) {
       const p = rowByHash.get(parentHash);
       if (!p) continue;
       ancestryHashes.add(p.hash);
-      if (isBoundary(p)) { boundaryHashes.add(p.hash); continue; }
+      if (p.sharedBoundary) boundaryHashes.add(p.hash);
       queue.push(p);
     }
   }
