@@ -125,6 +125,21 @@ git branch -D feature/a -q 2>/dev/null || git branch -D feature/a
 git branch -D feature/b -q 2>/dev/null || git branch -D feature/b
 commit "main work after both merges"
 
+# 7. cherry-pick-detection: a feature branch with two commits, each cherry-picked onto
+# main a different way — one with `-x` (leaves a "(cherry picked from commit ...)"
+# trailer in the message) and one without (only detectable by matching patch-id).
+echo "Creating cherry-pick-detection"
+repo="$REPOS_DIR/cherry-pick-detection"
+mkdir -p "$repo" && cd "$repo"
+git init -q
+commit "root"
+git checkout -qb feature/cherries
+commit "add feature x" feature.txt
+commit "add feature y" feature.txt
+git checkout -q main 2>/dev/null || git checkout -q master
+git cherry-pick -x feature/cherries~1 >/dev/null
+git cherry-pick feature/cherries >/dev/null
+
 echo ""
 echo "Done. Test repos created in $REPOS_DIR:"
 ls "$REPOS_DIR"

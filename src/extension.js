@@ -234,6 +234,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .commit.mergeCommit .node { width:14px; height:14px; transform:translate(-7px,-7px) rotate(45deg); border-radius:2px; }
   .details { margin-left:28px; width:650px; display:flex; gap:9px; align-items:baseline; white-space:nowrap; overflow:hidden; }
   .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); cursor:pointer; pointer-events:auto; }
+  .details .cherryPickIcon { flex:0 0 auto; color:var(--vscode-descriptionForeground); font-size:12px; }
   .subject { overflow:hidden; text-overflow:ellipsis; }
   .meta { color:var(--vscode-descriptionForeground); font-size:12px; }
   .dim { opacity:.16 !important; }
@@ -540,12 +541,38 @@ document.addEventListener('click', () => { commitDetailsPanel.style.display = 'n
 
 let openCommitHash = null;
 function statusLabel(status) { return (status || '').charAt(0); }
+function isCherryPick(row) {
+  return Boolean(row.cherryPickedFrom || row.cherryPickSourceHash);
+}
+function cherryPickIconHtml(row) {
+  if (!isCherryPick(row)) return '';
+  return '<span class="cherryPickIcon codicon codicon-repo-forked-compact" title="' + escapeForAttr(cherryPickTooltip(row)) + '"></span>';
+}
+function cherryPickTooltip(row) {
+  const lines = [];
+  if (row.cherryPickedFrom) lines.push('Cherry-picked from ' + row.cherryPickedFrom.slice(0, 8) + ' (commit message)');
+  if (row.cherryPickSourceHash && row.cherryPickSourceHash !== row.cherryPickedFrom) {
+    lines.push('Cherry pick of ' + row.cherryPickSourceHash.slice(0, 8) + ' detected (patch-id)');
+  }
+  return lines.join('\\n');
+}
+function cherryPickMetaHtml(row) {
+  let html = '';
+  if (row.cherryPickedFrom) {
+    html += '<div class="meta">Cherry-picked from ' + escapeHtmlClient(row.cherryPickedFrom.slice(0, 8)) + ' (commit message)</div>';
+  }
+  if (row.cherryPickSourceHash && row.cherryPickSourceHash !== row.cherryPickedFrom) {
+    html += '<div class="meta">Cherry pick of ' + escapeHtmlClient(row.cherryPickSourceHash.slice(0, 8)) + ' detected (patch-id)</div>';
+  }
+  return html;
+}
 function commitDetailsHeaderHtml(row, date) {
   const isSharedBase = row.branches && row.branches.length > 1;
   return '<span class="hash">' + row.shortHash + '</span>' +
     '<span class="subject">' + escapeHtmlClient(row.subject) + '</span>' +
     '<span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>' +
-    (isSharedBase ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '');
+    (isSharedBase ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '') +
+    cherryPickMetaHtml(row);
 }
 function renderCommitFiles(row, date, msg) {
   if (msg.hash !== openCommitHash) return;
@@ -613,7 +640,8 @@ model.rows.forEach(row => {
   node.style.left = laneX(row.laneIndex) + 'px';
   node.onmouseenter = () => {
     commitPopover.innerHTML = '<span class="hash">' + row.shortHash + '</span><span class="subject">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>' +
-      (isShared ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '');
+      (isShared ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '') +
+      cherryPickMetaHtml(row);
     commitPopover.style.display = 'block';
     const rect = node.getBoundingClientRect();
     commitPopover.style.left = (rect.right + 10) + 'px';
@@ -625,7 +653,7 @@ model.rows.forEach(row => {
 
   const details = document.createElement('div');
   details.className = 'details'; details.style.marginLeft = (graphWidth + 8) + 'px';
-  details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span><span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
+  details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span>' + cherryPickIconHtml(row) + '<span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
   details.querySelector('.hash').onclick = () => vscode.postMessage({type:'copyHash', hash:row.hash});
   details.querySelector('.subject').title += (details.querySelector('.subject').title ? ' — ' : '') + 'Click for commit details';
   details.querySelector('.subject').onclick = (e) => openCommitDetails(e, row, date);

@@ -1,6 +1,6 @@
 'use strict';
 
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +12,42 @@ async function runGit(cwd, args) {
     encoding: 'utf8'
   });
   return stdout;
+}
+
+// Computes a patch-id for every commit in one pass by piping `git log -p` straight into
+// `git patch-id`, instead of shelling out per commit (which would be O(commits) git calls).
+async function runGitPatchIds(cwd, args) {
+  return new Promise((resolve, reject) => {
+    const log = spawn('git', args, { cwd, windowsHide: true });
+    const patchId = spawn('git', ['patch-id', '--stable'], { cwd, windowsHide: true });
+
+    let out = '';
+    let err = '';
+    patchId.stdout.setEncoding('utf8');
+    patchId.stdout.on('data', (chunk) => { out += chunk; });
+    patchId.stderr.setEncoding('utf8');
+    patchId.stderr.on('data', (chunk) => { err += chunk; });
+
+    let logErr = '';
+    log.stderr.setEncoding('utf8');
+    log.stderr.on('data', (chunk) => { logErr += chunk; });
+
+    let settled = false;
+    const fail = (error) => { if (!settled) { settled = true; reject(error); } };
+    // Once either side of the pipe exits, writes to the other can fail with EPIPE; an
+    // unhandled 'error' on a stream would otherwise crash the whole extension host.
+    log.stdout.on('error', () => {});
+    patchId.stdin.on('error', () => {});
+    log.stdout.pipe(patchId.stdin);
+    log.on('error', fail);
+    patchId.on('error', fail);
+    patchId.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (code !== 0) return reject(new Error(err || logErr || `git patch-id exited with code ${code}`));
+      resolve(out);
+    });
+  });
 }
 
 async function isGitRepository(cwd) {
@@ -76,9 +112,11 @@ async function readBranches(cwd, includeRemoteBranches, includeLocalBranches = t
   return deduped.sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
 }
 
+const CHERRY_PICK_RE = /cherry picked from commit ([0-9a-f]{7,40})/i;
+
 async function readCommits(cwd, maxCommits) {
   // ASCII record/unit separators make commit messages safe to parse without JSON escaping tricks.
-  const pretty = '%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1e';
+  const pretty = '%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e';
   const out = await runGit(cwd, [
     'log', '--all', '--date-order', `--max-count=${maxCommits}`,
     `--pretty=format:${pretty}`
@@ -89,7 +127,8 @@ async function readCommits(cwd, maxCommits) {
     .map((record) => record.replace(/^\n+|\n+$/g, ''))
     .filter(Boolean)
     .map((record) => {
-      const [hash, parentText, author, email, timestamp, subject] = record.split('\x1f');
+      const [hash, parentText, author, email, timestamp, subject, body] = record.split('\x1f');
+      const cherryPickMatch = CHERRY_PICK_RE.exec(body || '');
       return {
         hash,
         shortHash: hash.slice(0, 8),
@@ -97,9 +136,45 @@ async function readCommits(cwd, maxCommits) {
         author,
         email,
         timestamp: Number(timestamp) * 1000,
-        subject: subject || '(no subject)'
+        subject: subject || '(no subject)',
+        cherryPickedFrom: cherryPickMatch ? cherryPickMatch[1] : undefined
       };
     });
+}
+
+async function readPatchIds(cwd, maxCommits) {
+  const out = await runGitPatchIds(cwd, [
+    'log', '--all', '--date-order', `--max-count=${maxCommits}`, '-p', '--no-color'
+  ]);
+
+  const patchIdByHash = new Map();
+  for (const line of out.split('\n')) {
+    if (!line) continue;
+    const [patchId, hash] = line.split(' ');
+    if (patchId && hash) patchIdByHash.set(hash, patchId);
+  }
+  return patchIdByHash;
+}
+
+// Commits sharing a patch-id carry the same change, which is what a content-preserving
+// cherry-pick (with no "(cherry picked from ...)" trailer) looks like; the oldest commit in
+// each group is treated as the original and every later one is flagged as derived from it.
+function findCherryPicksByPatchId(commits, patchIdByHash) {
+  const groups = new Map();
+  for (const commit of commits) {
+    const patchId = patchIdByHash.get(commit.hash);
+    if (!patchId) continue;
+    if (!groups.has(patchId)) groups.set(patchId, []);
+    groups.get(patchId).push(commit);
+  }
+
+  const sourceHashByHash = new Map();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const [original, ...rest] = [...group].sort((a, b) => a.timestamp - b.timestamp);
+    for (const commit of rest) sourceHashByHash.set(commit.hash, original.hash);
+  }
+  return sourceHashByHash;
 }
 
 async function readCommitFiles(cwd, hash) {
@@ -203,9 +278,12 @@ async function loadRepository(cwd, options = {}) {
   const includeRemoteBranches = Boolean(options.includeRemoteBranches);
   const includeLocalBranches = options.includeLocalBranches !== false;
 
-  const [branches, commits] = await Promise.all([
+  const [branches, commits, patchIdByHash] = await Promise.all([
     readBranches(cwd, includeRemoteBranches, includeLocalBranches),
-    readCommits(cwd, maxCommits)
+    readCommits(cwd, maxCommits),
+    // Patch-id-based cherry-pick detection is supplementary; if it fails for any reason
+    // (unusual git version, huge diffs, etc.) the rest of the view should still load.
+    readPatchIds(cwd, maxCommits).catch(() => new Map())
   ]);
 
   const [{ ownerByHash, branchesByHash }, branchWarnings] = await Promise.all([
@@ -215,7 +293,14 @@ async function loadRepository(cwd, options = {}) {
 
   const branchesWithWarnings = branches.map((b) => ({ ...b, ...branchWarnings.get(b.name) }));
 
-  return { branches: branchesWithWarnings, commits, ownerByHash, branchesByHash };
+  const cherryPickSourceByHash = findCherryPicksByPatchId(commits, patchIdByHash);
+  const commitsWithCherryPicks = commits.map((c) => ({
+    ...c,
+    patchId: patchIdByHash.get(c.hash),
+    cherryPickSourceHash: cherryPickSourceByHash.get(c.hash)
+  }));
+
+  return { branches: branchesWithWarnings, commits: commitsWithCherryPicks, ownerByHash, branchesByHash };
 }
 
 module.exports = {
@@ -223,6 +308,8 @@ module.exports = {
   isGitRepository,
   readBranches,
   readCommits,
+  readPatchIds,
+  findCherryPicksByPatchId,
   readCommitFiles,
   readBranchWarnings,
   readFirstParentDistances,

@@ -65,3 +65,4 @@ MIT
 * rename to git-lanes?? need better name!
 * unify the local branch ant its remote origin, so it does not appear as two branches in the lanes
 * `history` lane is problematic, as multiple `history` lanes look like one, but in reality, there are multiple in parallel. how to visualize this without creating multiple history lanes in parallel from top to bottom? it would be ok to show these temporary lanes as in-between lanes. create a plan how to visualize first
+* visualize cherry picks
