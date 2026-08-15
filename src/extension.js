@@ -463,7 +463,7 @@ function toggleTrace(row) {
     activeTrace = traceBranch(row);
     for (const hash of activeTrace.ancestryHashes) {
       const r = rowByHash.get(hash);
-      if (r) r.branches.forEach((branch) => selectedLanes.add(branch));
+      if (r) selectedLanes.add(r.lane);
     }
   }
   applyTrace();
