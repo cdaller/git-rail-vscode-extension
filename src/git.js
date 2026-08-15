@@ -116,7 +116,7 @@ const CHERRY_PICK_RE = /cherry picked from commit ([0-9a-f]{7,40})/i;
 
 async function readCommits(cwd, maxCommits) {
   // ASCII record/unit separators make commit messages safe to parse without JSON escaping tricks.
-  const pretty = '%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e';
+  const pretty = '%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%s%x1f%b%x1e';
   const out = await runGit(cwd, [
     'log', '--all', '--date-order', `--max-count=${maxCommits}`,
     `--pretty=format:${pretty}`
@@ -127,7 +127,7 @@ async function readCommits(cwd, maxCommits) {
     .map((record) => record.replace(/^\n+|\n+$/g, ''))
     .filter(Boolean)
     .map((record) => {
-      const [hash, parentText, author, email, timestamp, subject, body] = record.split('\x1f');
+      const [hash, parentText, author, email, timestamp, committerTimestamp, subject, body] = record.split('\x1f');
       const cherryPickMatch = CHERRY_PICK_RE.exec(body || '');
       return {
         hash,
@@ -136,6 +136,10 @@ async function readCommits(cwd, maxCommits) {
         author,
         email,
         timestamp: Number(timestamp) * 1000,
+        // cherry-pick preserves the author date, so the copy and the original often share the
+        // same `timestamp`; the committer date is the only one guaranteed to differ (you can't
+        // commit a cherry-pick before the original exists), which is what ordering them needs.
+        committerTimestamp: Number(committerTimestamp) * 1000,
         subject: subject || '(no subject)',
         cherryPickedFrom: cherryPickMatch ? cherryPickMatch[1] : undefined
       };
@@ -157,8 +161,10 @@ async function readPatchIds(cwd, maxCommits) {
 }
 
 // Commits sharing a patch-id carry the same change, which is what a content-preserving
-// cherry-pick (with no "(cherry picked from ...)" trailer) looks like; the oldest commit in
-// each group is treated as the original and every later one is flagged as derived from it.
+// cherry-pick (with no "(cherry picked from ...)" trailer) looks like; the commit with the
+// earliest committer date in each group is treated as the original and every later one is
+// flagged as derived from it. Author date can't be used here — cherry-pick preserves it, so
+// the copy and the original usually share the same author timestamp.
 function findCherryPicksByPatchId(commits, patchIdByHash) {
   const groups = new Map();
   for (const commit of commits) {
@@ -171,7 +177,7 @@ function findCherryPicksByPatchId(commits, patchIdByHash) {
   const sourceHashByHash = new Map();
   for (const group of groups.values()) {
     if (group.length < 2) continue;
-    const [original, ...rest] = [...group].sort((a, b) => a.timestamp - b.timestamp);
+    const [original, ...rest] = [...group].sort((a, b) => a.committerTimestamp - b.committerTimestamp);
     for (const commit of rest) sourceHashByHash.set(commit.hash, original.hash);
   }
   return sourceHashByHash;
@@ -294,26 +300,10 @@ async function loadRepository(cwd, options = {}) {
   const branchesWithWarnings = branches.map((b) => ({ ...b, ...branchWarnings.get(b.name) }));
 
   const cherryPickSourceByHash = findCherryPicksByPatchId(commits, patchIdByHash);
-
-  // The reverse relation, so the original commit can also show "this was cherry-picked
-  // to <hash>" rather than only the copy showing where it came from.
-  const cherryPickedToByHash = new Map();
-  const addCherryPickedTo = (sourceHash, targetHash) => {
-    if (!cherryPickedToByHash.has(sourceHash)) cherryPickedToByHash.set(sourceHash, new Set());
-    cherryPickedToByHash.get(sourceHash).add(targetHash);
-  };
-  for (const c of commits) {
-    if (c.cherryPickedFrom) addCherryPickedTo(c.cherryPickedFrom, c.hash);
-  }
-  for (const [hash, sourceHash] of cherryPickSourceByHash) {
-    addCherryPickedTo(sourceHash, hash);
-  }
-
   const commitsWithCherryPicks = commits.map((c) => ({
     ...c,
     patchId: patchIdByHash.get(c.hash),
-    cherryPickSourceHash: cherryPickSourceByHash.get(c.hash),
-    cherryPickedTo: cherryPickedToByHash.has(c.hash) ? [...cherryPickedToByHash.get(c.hash)] : undefined
+    cherryPickSourceHash: cherryPickSourceByHash.get(c.hash)
   }));
 
   return { branches: branchesWithWarnings, commits: commitsWithCherryPicks, ownerByHash, branchesByHash };

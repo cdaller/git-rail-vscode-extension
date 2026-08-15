@@ -228,6 +228,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .node.traceBoundary { box-shadow:0 0 0 3px var(--vscode-editorWarning-foreground, #cca700); }
   .edge { fill:none; stroke:var(--vscode-editorIndentGuide-activeBackground); stroke-width:2; opacity:.55; pointer-events:stroke; cursor:pointer; }
   .edge.merge { stroke-dasharray:5 4; opacity:.9; }
+  .cherryPickEdge { fill:none; stroke:var(--vscode-charts-red, #d16969); stroke-width:1.5; stroke-dasharray:3 3; opacity:.7; pointer-events:stroke; cursor:pointer; }
   .commit { position:absolute; height:var(--row-h); display:flex; align-items:center; border-bottom:1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent); pointer-events:none; }
   .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); pointer-events:auto; cursor:pointer; }
   .node.sharedBase { outline:2px dashed var(--vscode-descriptionForeground); outline-offset:2px; }
@@ -347,18 +348,19 @@ header.appendChild(searchBar);
 const search = document.createElement('input');
 search.type = 'search';
 search.className = 'search';
-search.placeholder = 'Filter (words OR-combined, "quoted" = exact); or author:x message:x commit:x';
+search.placeholder = 'Filter Commits (words OR-combined, "quoted" = exact); or author:x message:x commit:x';
 searchBar.appendChild(search);
 
 const compactToggles = document.createElement('div');
 compactToggles.className = 'compactToggles';
 searchBar.appendChild(compactToggles);
 
-function createCompactToggle(labelText, title) {
+function createCompactToggle(labelText, title, defaultChecked) {
   const toggle = document.createElement('label');
   toggle.className = 'compactToggle';
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
+  checkbox.checked = Boolean(defaultChecked);
   toggle.appendChild(checkbox);
   toggle.appendChild(document.createTextNode(labelText));
   toggle.title = title;
@@ -366,7 +368,8 @@ function createCompactToggle(labelText, title) {
   return checkbox;
 }
 const compactRowsCheckbox = createCompactToggle('Compact rows', 'Remove non-matching commit rows instead of just hiding them');
-const compactBranchesCheckbox = createCompactToggle('Compact branches', 'Hide branch lanes with no visible commits instead of just leaving them empty');
+const compactBranchesCheckbox = createCompactToggle('Only show selected branches', 'Hide branch lanes with no visible commits instead of just leaving them empty');
+const showCherryPicksCheckbox = createCompactToggle('Show cherry picks', 'Draw dashed lines and cherry markers in the lane graph connecting cherry-picks to their source (the icon and details stay shown either way)', true);
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = document.createElementNS(NS, 'svg');
@@ -515,6 +518,31 @@ model.edges.forEach(edge => {
   svg.appendChild(path);
   edgeEls.push({ path, edge });
 });
+
+// Dashed lines connecting a cherry-pick to the commit it was picked from, drawn only when
+// that source commit is itself visible in the loaded history.
+const cherryPickEdgeEls = [];
+model.rows.forEach(row => {
+  const originHash = row.cherryPickedFrom || row.cherryPickSourceHash;
+  if (!originHash) return;
+  const origin = rowByHash.get(originHash);
+  if (!origin) return;
+  const cherryEdge = { fromLane: origin.laneIndex, fromRow: origin.row, toLane: row.laneIndex, toRow: row.row };
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', edgePathD(laneX(cherryEdge.fromLane), rowY(cherryEdge.fromRow), laneX(cherryEdge.toLane), rowY(cherryEdge.toRow)));
+  path.setAttribute('class', 'cherryPickEdge');
+  path.onmouseenter = (e) => {
+    commitPopover.innerHTML = '<span class="hash">' + origin.shortHash + '</span><span class="subject">' + escapeHtmlClient(origin.subject) + '</span>' +
+      '<div class="meta">🍒 cherry-picked to</div>' +
+      '<span class="hash">' + row.shortHash + '</span><span class="subject">' + escapeHtmlClient(row.subject) + '</span>';
+    commitPopover.style.display = 'block';
+    commitPopover.style.left = (e.clientX + 12) + 'px';
+    commitPopover.style.top = (e.clientY + 12) + 'px';
+  };
+  path.onmouseleave = () => { commitPopover.style.display = 'none'; };
+  svg.appendChild(path);
+  cherryPickEdgeEls.push({ path, edge: cherryEdge });
+});
 document.addEventListener('click', () => { edgePopover.style.display = 'none'; });
 
 const commitPopover = document.createElement('div');
@@ -542,7 +570,7 @@ document.addEventListener('click', () => { commitDetailsPanel.style.display = 'n
 let openCommitHash = null;
 function statusLabel(status) { return (status || '').charAt(0); }
 function isCherryPick(row) {
-  return Boolean(row.cherryPickedFrom || row.cherryPickSourceHash || (row.cherryPickedTo && row.cherryPickedTo.length));
+  return Boolean(row.cherryPickedFrom || row.cherryPickSourceHash);
 }
 function cherryPickIconHtml(row) {
   if (!isCherryPick(row)) return '';
@@ -553,13 +581,10 @@ function cherryPickTooltip(row) {
 }
 function cherryPickLines(row) {
   const lines = [];
-  if (row.cherryPickedFrom) lines.push('Cherry-picked from ' + row.cherryPickedFrom.slice(0, 8) + ' (commit message)');
+  if (row.cherryPickedFrom) lines.push('🍒 Cherry-picked from ' + row.cherryPickedFrom.slice(0, 8) + ' (commit message)');
   if (row.cherryPickSourceHash && row.cherryPickSourceHash !== row.cherryPickedFrom) {
-    lines.push('Cherry pick of ' + row.cherryPickSourceHash.slice(0, 8) + ' detected (patch-id)');
+    lines.push('🍒 Cherry pick of ' + row.cherryPickSourceHash.slice(0, 8) + ' detected (patch-id)');
   }
-  (row.cherryPickedTo || []).forEach((hash) => {
-    lines.push('Cherry-picked to ' + hash.slice(0, 8));
-  });
   return lines;
 }
 function cherryPickMetaHtml(row) {
@@ -840,6 +865,23 @@ function applyFilter() {
     path.style.display = '';
     path.setAttribute('d', edgePathD(currentLaneX(edge.fromLane), currentRowY(edge.fromRow), currentLaneX(edge.toLane), currentRowY(edge.toRow)));
   });
+
+  cherryPickEdgeEls.forEach(({ path, edge }) => {
+    if (!showCherryPicksCheckbox.checked) {
+      path.style.display = 'none';
+      return;
+    }
+    if (anyCompact && (!visibleByRow.get(edge.fromRow) || !visibleByRow.get(edge.toRow))) {
+      path.style.display = 'none';
+      return;
+    }
+    const x1 = anyCompact ? currentLaneX(edge.fromLane) : laneX(edge.fromLane);
+    const y1 = anyCompact ? currentRowY(edge.fromRow) : rowY(edge.fromRow);
+    const x2 = anyCompact ? currentLaneX(edge.toLane) : laneX(edge.toLane);
+    const y2 = anyCompact ? currentRowY(edge.toRow) : rowY(edge.toRow);
+    path.style.display = '';
+    path.setAttribute('d', edgePathD(x1, y1, x2, y2));
+  });
 }
 // Loading more commits replaces the whole webview (a fresh DOM/script each time), which would
 // otherwise silently drop the search text, compact toggles, branch selection/trace, and scroll
@@ -849,6 +891,7 @@ function saveUiState() {
     search: search.value,
     compactRows: compactRowsCheckbox.checked,
     compactBranches: compactBranchesCheckbox.checked,
+    showCherryPicks: showCherryPicksCheckbox.checked,
     selectedLanes: [...selectedLanes],
     traceHash: activeTrace ? activeTrace.startHash : null,
     scrollTop: viewport.scrollTop,
@@ -859,6 +902,7 @@ function saveUiState() {
 search.addEventListener('input', () => { applyFilter(); saveUiState(); });
 compactRowsCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
 compactBranchesCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
+showCherryPicksCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault();
@@ -897,6 +941,7 @@ if (savedUiState) {
   if (savedUiState.search) search.value = savedUiState.search;
   compactRowsCheckbox.checked = Boolean(savedUiState.compactRows);
   compactBranchesCheckbox.checked = Boolean(savedUiState.compactBranches);
+  showCherryPicksCheckbox.checked = savedUiState.showCherryPicks !== false;
   (savedUiState.selectedLanes || []).forEach((lane) => selectedLanes.add(lane));
   applyFilter();
   applyFocus();
