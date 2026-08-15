@@ -294,10 +294,26 @@ async function loadRepository(cwd, options = {}) {
   const branchesWithWarnings = branches.map((b) => ({ ...b, ...branchWarnings.get(b.name) }));
 
   const cherryPickSourceByHash = findCherryPicksByPatchId(commits, patchIdByHash);
+
+  // The reverse relation, so the original commit can also show "this was cherry-picked
+  // to <hash>" rather than only the copy showing where it came from.
+  const cherryPickedToByHash = new Map();
+  const addCherryPickedTo = (sourceHash, targetHash) => {
+    if (!cherryPickedToByHash.has(sourceHash)) cherryPickedToByHash.set(sourceHash, new Set());
+    cherryPickedToByHash.get(sourceHash).add(targetHash);
+  };
+  for (const c of commits) {
+    if (c.cherryPickedFrom) addCherryPickedTo(c.cherryPickedFrom, c.hash);
+  }
+  for (const [hash, sourceHash] of cherryPickSourceByHash) {
+    addCherryPickedTo(sourceHash, hash);
+  }
+
   const commitsWithCherryPicks = commits.map((c) => ({
     ...c,
     patchId: patchIdByHash.get(c.hash),
-    cherryPickSourceHash: cherryPickSourceByHash.get(c.hash)
+    cherryPickSourceHash: cherryPickSourceByHash.get(c.hash),
+    cherryPickedTo: cherryPickedToByHash.has(c.hash) ? [...cherryPickedToByHash.get(c.hash)] : undefined
   }));
 
   return { branches: branchesWithWarnings, commits: commitsWithCherryPicks, ownerByHash, branchesByHash };

@@ -234,7 +234,7 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .commit.mergeCommit .node { width:14px; height:14px; transform:translate(-7px,-7px) rotate(45deg); border-radius:2px; }
   .details { margin-left:28px; width:650px; display:flex; gap:9px; align-items:baseline; white-space:nowrap; overflow:hidden; }
   .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); cursor:pointer; pointer-events:auto; }
-  .details .cherryPickIcon { flex:0 0 auto; color:var(--vscode-descriptionForeground); font-size:12px; }
+  .details .cherryPickIcon { flex:0 0 auto; font-size:12px; }
   .subject { overflow:hidden; text-overflow:ellipsis; }
   .meta { color:var(--vscode-descriptionForeground); font-size:12px; }
   .dim { opacity:.16 !important; }
@@ -542,29 +542,28 @@ document.addEventListener('click', () => { commitDetailsPanel.style.display = 'n
 let openCommitHash = null;
 function statusLabel(status) { return (status || '').charAt(0); }
 function isCherryPick(row) {
-  return Boolean(row.cherryPickedFrom || row.cherryPickSourceHash);
+  return Boolean(row.cherryPickedFrom || row.cherryPickSourceHash || (row.cherryPickedTo && row.cherryPickedTo.length));
 }
 function cherryPickIconHtml(row) {
   if (!isCherryPick(row)) return '';
-  return '<span class="cherryPickIcon codicon codicon-repo-forked-compact" title="' + escapeForAttr(cherryPickTooltip(row)) + '"></span>';
+  return '<span class="cherryPickIcon" title="' + escapeForAttr(cherryPickTooltip(row)) + '">🍒</span>';
 }
 function cherryPickTooltip(row) {
+  return cherryPickLines(row).join('\\n');
+}
+function cherryPickLines(row) {
   const lines = [];
   if (row.cherryPickedFrom) lines.push('Cherry-picked from ' + row.cherryPickedFrom.slice(0, 8) + ' (commit message)');
   if (row.cherryPickSourceHash && row.cherryPickSourceHash !== row.cherryPickedFrom) {
     lines.push('Cherry pick of ' + row.cherryPickSourceHash.slice(0, 8) + ' detected (patch-id)');
   }
-  return lines.join('\\n');
+  (row.cherryPickedTo || []).forEach((hash) => {
+    lines.push('Cherry-picked to ' + hash.slice(0, 8));
+  });
+  return lines;
 }
 function cherryPickMetaHtml(row) {
-  let html = '';
-  if (row.cherryPickedFrom) {
-    html += '<div class="meta">Cherry-picked from ' + escapeHtmlClient(row.cherryPickedFrom.slice(0, 8)) + ' (commit message)</div>';
-  }
-  if (row.cherryPickSourceHash && row.cherryPickSourceHash !== row.cherryPickedFrom) {
-    html += '<div class="meta">Cherry pick of ' + escapeHtmlClient(row.cherryPickSourceHash.slice(0, 8)) + ' detected (patch-id)</div>';
-  }
-  return html;
+  return cherryPickLines(row).map((line) => '<div class="meta">' + escapeHtmlClient(line) + '</div>').join('');
 }
 function commitDetailsHeaderHtml(row, date) {
   const isSharedBase = row.branches && row.branches.length > 1;
