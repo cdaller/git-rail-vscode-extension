@@ -25,6 +25,17 @@ A VS Code extension prototype for visualizing Git history as **stable branch rai
 
 The prototype has no runtime npm dependencies. It calls the `git` executable available in the extension host environment.
 
+## Install it into your default VS Code
+
+To use the extension outside of the Extension Development Host, package it into a `.vsix` and install that into your normal VS Code:
+
+```sh
+npx --yes @vscode/vsce package
+code --install-extension git-rail-0.1.0.vsix
+```
+
+`vsce` doesn't need to be installed as a dependency; `npx` fetches it on demand. Adjust the version number in the `.vsix` filename to match `package.json`. Repeat both commands after making changes to pick up the new version (VS Code will overwrite the previously installed one).
+
 ## Settings
 
 - `gitRail.maxCommits` — default `300`
@@ -65,4 +76,4 @@ MIT
 * rename to git-lanes?? need better name!
 * unify the local branch ant its remote origin, so it does not appear as two branches in the lanes
 * `history` lane is problematic, as multiple `history` lanes look like one, but in reality, there are multiple in parallel. how to visualize this without creating multiple history lanes in parallel from top to bottom? it would be ok to show these temporary lanes as in-between lanes. create a plan how to visualize first
-* visualize cherry picks
+* show visually that a branch has no commits before the first in the list (fainter line?, dotted line?), so if scrolling down, one sees which branches are providing commits at that point in time
