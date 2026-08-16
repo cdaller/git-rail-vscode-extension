@@ -2,10 +2,12 @@
 
 A VS Code extension prototype for visualizing Git history as **stable branch rails** instead of continuously rearranging topology columns.
 
+Target is to easily identify all the commits that lead to the current state in one branch. So clicking on one branch rail/lane shows all commits in the graph and in the commit message list.
+
 ## What the MVP does
 
 - opens a full editor panel with `Git Rail: Open Branch Map`
-- creates one stable vertical rail per current local branch
+- creates one stable vertical rail per current local/remote branch
 - assigns first-parent history to those rails
 - renders ordinary parent edges and dashed merge-parent edges
 - provides a synthetic `history` rail for commits that cannot be assigned to a current branch
@@ -39,7 +41,10 @@ code --install-extension git-rail-0.1.0.vsix
 ## Settings
 
 - `gitRail.maxCommits` — default `300`
+- `gitRail.includeLocalBranches` — default `true`
 - `gitRail.includeRemoteBranches` — default `false`
+- `gitRail.hideEmptyBranches` — default `true`
+- `gitRail.maxBranchLabelWidth` — default `130`
 
 ## Design notes
 
@@ -73,7 +78,6 @@ MIT
 ## TODO
 
 * color mode (configurable): draw each branch lane in different colors
-* rename to git-lanes?? need better name!
-* unify the local branch ant its remote origin, so it does not appear as two branches in the lanes
+* rename to git-lanes?? extension needs a better name!
 * `history` lane is problematic, as multiple `history` lanes look like one, but in reality, there are multiple in parallel. how to visualize this without creating multiple history lanes in parallel from top to bottom? it would be ok to show these temporary lanes as in-between lanes. create a plan how to visualize first
-* show visually that a branch has no commits before the first in the list (fainter line?, dotted line?), so if scrolling down, one sees which branches are providing commits at that point in time
+* add screenshots to README.md
