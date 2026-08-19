@@ -241,29 +241,6 @@ async function readFirstParentDistances(cwd, branches, visibleHashes) {
   };
 }
 
-// Full (not first-parent-only) ancestry per branch, restricted to commits already loaded into
-// the view. This answers "does this branch's history directly contain this commit" — the basis
-// for "included in selected branch", which also has to catch merges via a non-first-parent side.
-async function readContainingBranches(cwd, branches, visibleHashes) {
-  const visible = new Set(visibleHashes);
-  const branchesByHash = new Map();
-
-  await Promise.all(branches.map(async (branch) => {
-    try {
-      const out = await runGit(cwd, ['rev-list', branch.ref]);
-      for (const hash of out.split('\n')) {
-        if (!hash || !visible.has(hash)) continue;
-        if (!branchesByHash.has(hash)) branchesByHash.set(hash, new Set());
-        branchesByHash.get(hash).add(branch.name);
-      }
-    } catch {
-      // A ref can disappear during refresh; the next refresh will reconcile it.
-    }
-  }));
-
-  return new Map([...branchesByHash].map(([hash, names]) => [hash, [...names]]));
-}
-
 async function readBranchWarnings(cwd, localBranches) {
   const warnings = new Map();
   await Promise.all(localBranches.map(async (branch) => {
@@ -315,10 +292,9 @@ async function loadRepository(cwd, options = {}) {
     readPatchIds(cwd, maxCommits).catch(() => new Map())
   ]);
 
-  const [{ ownerByHash, branchesByHash }, branchWarnings, containingBranchesByHash] = await Promise.all([
+  const [{ ownerByHash, branchesByHash }, branchWarnings] = await Promise.all([
     readFirstParentDistances(cwd, branches, commits.map((c) => c.hash)),
-    readBranchWarnings(cwd, branches.filter((b) => b.ref.startsWith('refs/heads/'))),
-    readContainingBranches(cwd, branches, commits.map((c) => c.hash))
+    readBranchWarnings(cwd, branches.filter((b) => b.ref.startsWith('refs/heads/')))
   ]);
 
   const branchesWithWarnings = branches.map((b) => ({ ...b, ...branchWarnings.get(b.name) }));
@@ -327,8 +303,7 @@ async function loadRepository(cwd, options = {}) {
   const commitsWithCherryPicks = commits.map((c) => ({
     ...c,
     patchId: patchIdByHash.get(c.hash),
-    cherryPickSourceHash: cherryPickSourceByHash.get(c.hash),
-    containedInBranches: containingBranchesByHash.get(c.hash) || []
+    cherryPickSourceHash: cherryPickSourceByHash.get(c.hash)
   }));
 
   return { branches: branchesWithWarnings, commits: commitsWithCherryPicks, ownerByHash, branchesByHash };
@@ -344,6 +319,5 @@ module.exports = {
   readCommitFiles,
   readBranchWarnings,
   readFirstParentDistances,
-  readContainingBranches,
   loadRepository
 };
