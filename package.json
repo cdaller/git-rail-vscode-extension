@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "local",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cdaller/git-rail-vscode-extension.git"
+  },
   "engines": {
     "vscode": "^1.96.0"
   },
