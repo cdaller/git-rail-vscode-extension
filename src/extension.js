@@ -233,6 +233,8 @@ function renderHtml(repoName, layout, branches, hasMore, maxBranchLabelWidth, co
   .commit { position:absolute; height:var(--row-h); display:flex; align-items:center; border-bottom:1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent); pointer-events:none; }
   .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); pointer-events:auto; cursor:pointer; }
   .node.sharedBase { outline:2px dashed var(--vscode-descriptionForeground); outline-offset:2px; }
+  .node.included::after { content:'✓'; position:absolute; right:-3px; bottom:-3px; width:10px; height:10px; line-height:10px; font-size:8px; text-align:center; border-radius:50%; background:var(--vscode-gitDecoration-addedResourceForeground, #2ea043); color:#fff; }
+  .includedIcon { flex:0 0 auto; font-size:11px; color:var(--vscode-gitDecoration-addedResourceForeground, #2ea043); display:none; }
   .commit.mergeCommit .node { width:14px; height:14px; transform:translate(-7px,-7px) rotate(45deg); border-radius:2px; }
   .details { margin-left:28px; width:650px; display:flex; gap:9px; align-items:baseline; white-space:nowrap; overflow:hidden; }
   .hash { font-family:var(--vscode-editor-font-family); color:var(--vscode-textLink-foreground); cursor:pointer; pointer-events:auto; }
@@ -326,6 +328,7 @@ model.lanes.forEach((lane, i) => {
     applyTrace();
     applyFocus();
     applyFilter();
+    applyIncluded();
     saveUiState();
   };
   el.onmouseenter = () => {
@@ -371,6 +374,7 @@ function createCompactToggle(labelText, title, defaultChecked) {
 const compactRowsCheckbox = createCompactToggle('Compact rows', 'Remove non-matching commit rows instead of just hiding them');
 const compactBranchesCheckbox = createCompactToggle('Only show selected branches', 'Hide branch lanes with no visible commits instead of just leaving them empty');
 const showCherryPicksCheckbox = createCompactToggle('Show cherry picks', 'Draw dashed lines and cherry markers in the lane graph connecting cherry-picks to their source (the icon and details stay shown either way)', true);
+const showIncludedCheckbox = createCompactToggle('Show commits included', 'Mark commits already included in the selected branch(es) — directly or via cherry-pick — with a check icon, and keep them from being grayed out', false);
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = document.createElementNS(NS, 'svg');
@@ -436,6 +440,57 @@ model.lanes.forEach((lane, i) => {
 });
 
 const rowByHash = new Map(model.rows.map(r => [r.hash, r]));
+
+// Which branches already contain each commit — directly (its own patch is in that branch's
+// full ancestry, server-side) or indirectly (a cherry-pick counterpart of it is). Merging in
+// the cherry-pick links here, once, means "included in selected branch" doesn't need to know
+// about cherry-picks at all — it just reads this set.
+const containingBranchesByHash = new Map(model.rows.map(r => [r.hash, new Set(r.containedInBranches || [])]));
+const rowsByPatchId = new Map();
+model.rows.forEach(row => {
+  if (!row.patchId) return;
+  if (!rowsByPatchId.has(row.patchId)) rowsByPatchId.set(row.patchId, []);
+  rowsByPatchId.get(row.patchId).push(row);
+});
+model.rows.forEach(row => {
+  const names = containingBranchesByHash.get(row.hash);
+  const mergeFrom = (hash) => {
+    const other = containingBranchesByHash.get(hash);
+    if (other) other.forEach(n => names.add(n));
+  };
+  if (row.cherryPickedFrom) mergeFrom(row.cherryPickedFrom);
+  if (row.cherryPickSourceHash) mergeFrom(row.cherryPickSourceHash);
+});
+rowsByPatchId.forEach(group => {
+  if (group.length < 2) return;
+  const union = new Set();
+  group.forEach(r => containingBranchesByHash.get(r.hash).forEach(n => union.add(n)));
+  group.forEach(r => union.forEach(n => containingBranchesByHash.get(r.hash).add(n)));
+});
+function isIncludedInSelectedBranches(row) {
+  if (!selectedLanes.size) return false;
+  const names = containingBranchesByHash.get(row.hash);
+  if (!names) return false;
+  for (const lane of selectedLanes) if (names.has(lane)) return true;
+  return false;
+}
+// Runs after applyFocus() and, when the checkbox is on, overrides its per-commit dim/focused
+// verdict: a commit already included in a selected branch (directly or via cherry-pick) is
+// shown normally and check-marked instead of grayed out, even though its own lane isn't selected.
+function applyIncluded() {
+  const hasSelection = selectedLanes.size > 0;
+  showIncludedCheckbox.parentElement.style.display = hasSelection ? '' : 'none';
+  commitEls.forEach(({ el, row, node, includedIconEl }) => {
+    const included = showIncludedCheckbox.checked && hasSelection && isIncludedInSelectedBranches(row);
+    node.classList.toggle('included', included);
+    if (includedIconEl) includedIconEl.style.display = included ? 'inline' : 'none';
+    if (hasSelection) {
+      const show = included || selectedLanes.has(row.lane);
+      el.classList.toggle('focused', show);
+      el.classList.toggle('dim', !show);
+    }
+  });
+}
 
 // Traces a commit's full ancestry back to the root, regardless of whether that history is
 // still exclusively owned by this branch. Commits flagged as sharedBoundary (layout.js -
@@ -505,6 +560,7 @@ function toggleTrace(row) {
   applyTrace();
   applyFocus();
   applyFilter();
+  applyIncluded();
   saveUiState();
 }
 function topRowOfLane(laneIndex) {
@@ -713,14 +769,14 @@ model.rows.forEach(row => {
 
   const details = document.createElement('div');
   details.className = 'details'; details.style.marginLeft = (graphWidth + 8) + 'px';
-  details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span>' + cherryPickIconHtml(row) + '<span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
+  details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span>' + cherryPickIconHtml(row) + '<span class="includedIcon" title="Included in the selected branch(es) — directly or via cherry-pick">✓</span><span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
   details.querySelector('.hash').onclick = () => vscode.postMessage({type:'copyHash', hash:row.hash});
   details.querySelector('.subject').title += (details.querySelector('.subject').title ? ' — ' : '') + 'Click for commit details';
   details.querySelector('.subject').onclick = (e) => openCommitDetails(e, row, date);
   details.querySelector('.meta').onclick = (e) => openCommitDetails(e, row, date);
   el.appendChild(details);
   canvas.appendChild(el);
-  commitEls.push({ el, row, node, details });
+  commitEls.push({ el, row, node, details, includedIconEl: details.querySelector('.includedIcon') });
 });
 
 let loadMoreEl;
@@ -948,6 +1004,7 @@ function saveUiState() {
     compactRows: compactRowsCheckbox.checked,
     compactBranches: compactBranchesCheckbox.checked,
     showCherryPicks: showCherryPicksCheckbox.checked,
+    showIncluded: showIncludedCheckbox.checked,
     selectedLanes: [...selectedLanes],
     traceHash: activeTrace ? activeTrace.startHash : null,
     scrollTop: viewport.scrollTop,
@@ -959,6 +1016,7 @@ search.addEventListener('input', () => { applyFilter(); saveUiState(); });
 compactRowsCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
 compactBranchesCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
 showCherryPicksCheckbox.addEventListener('change', () => { applyFilter(); saveUiState(); });
+showIncludedCheckbox.addEventListener('change', () => { applyIncluded(); saveUiState(); });
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault();
@@ -988,7 +1046,7 @@ function applyFocus() {
 function escapeHtmlClient(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function escapeForAttr(s) { return escapeHtmlClient(s).replaceAll('"','&quot;'); }
 
-document.getElementById('clear').onclick = () => { selectedLanes.clear(); activeTrace = null; applyFocus(); applyFilter(); applyTrace(); saveUiState(); };
+document.getElementById('clear').onclick = () => { selectedLanes.clear(); activeTrace = null; applyFocus(); applyFilter(); applyTrace(); applyIncluded(); saveUiState(); };
 document.getElementById('refresh').onclick = () => vscode.postMessage({type:'refresh'});
 if (!model.rows.length) canvas.insertAdjacentHTML('beforeend','<div class="empty">No commits found.</div>');
 
@@ -998,15 +1056,19 @@ if (savedUiState) {
   compactRowsCheckbox.checked = Boolean(savedUiState.compactRows);
   compactBranchesCheckbox.checked = Boolean(savedUiState.compactBranches);
   showCherryPicksCheckbox.checked = savedUiState.showCherryPicks !== false;
+  showIncludedCheckbox.checked = Boolean(savedUiState.showIncluded);
   (savedUiState.selectedLanes || []).forEach((lane) => selectedLanes.add(lane));
   applyFilter();
   applyFocus();
+  applyIncluded();
   if (savedUiState.traceHash) {
     const tracedRow = rowByHash.get(savedUiState.traceHash);
     if (tracedRow) { activeTrace = traceBranch(tracedRow); applyTrace(); }
   }
   if (savedUiState.scrollTop != null) viewport.scrollTop = savedUiState.scrollTop;
   if (savedUiState.scrollLeft != null) viewport.scrollLeft = savedUiState.scrollLeft;
+} else {
+  applyIncluded();
 }
 </script>
 </body></html>`;
