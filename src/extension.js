@@ -367,7 +367,14 @@ function createCompactToggle(labelText, title, defaultChecked) {
   checkbox.checked = Boolean(defaultChecked);
   toggle.appendChild(checkbox);
   toggle.appendChild(document.createTextNode(labelText));
-  toggle.title = title;
+  toggle.onmouseenter = () => {
+    branchPopover.textContent = title;
+    branchPopover.style.display = 'block';
+    const rect = toggle.getBoundingClientRect();
+    branchPopover.style.left = rect.left + 'px';
+    branchPopover.style.top = (rect.bottom + 6) + 'px';
+  };
+  toggle.onmouseleave = () => { branchPopover.style.display = 'none'; };
   compactToggles.appendChild(toggle);
   return checkbox;
 }
