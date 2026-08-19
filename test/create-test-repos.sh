@@ -140,6 +140,21 @@ git checkout -q main 2>/dev/null || git checkout -q master
 git cherry-pick -x feature/cherries~1 >/dev/null
 git cherry-pick feature/cherries >/dev/null
 
+# 8. simple-cherry-pick: a single commit ("change1") on the main branch, cherry-picked
+# (without -x) onto a "test" branch created before that commit existed — minimal repro
+# for "mark commits already in trace" cherry-pick-equivalence detection (patch-id match only, no
+# "(cherry picked from commit ...)" trailer to go by).
+echo "Creating simple-cherry-pick"
+repo="$REPOS_DIR/simple-cherry-pick"
+mkdir -p "$repo" && cd "$repo"
+git init -q
+commit "root"
+commit "change1"
+change1_hash="$(git rev-parse HEAD)"
+git checkout -qb test HEAD~1
+git cherry-pick "$change1_hash" >/dev/null
+git checkout -q main 2>/dev/null || git checkout -q master
+
 echo ""
 echo "Done. Test repos created in $REPOS_DIR:"
 ls "$REPOS_DIR"

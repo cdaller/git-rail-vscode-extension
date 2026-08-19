@@ -217,7 +217,7 @@ function createCompactToggle(labelText, title, defaultChecked) {
 const compactRowsCheckbox = createCompactToggle('Compact rows', 'Remove non-matching commit rows instead of just hiding them');
 const compactBranchesCheckbox = createCompactToggle('Only show selected branches', 'Hide branch lanes with no visible commits instead of just leaving them empty');
 const showCherryPicksCheckbox = createCompactToggle('Show cherry picks', 'Draw dashed lines and cherry markers in the lane graph connecting cherry-picks to their source (the icon and details stay shown either way)', true);
-const showIncludedCheckbox = createCompactToggle('Show commits included', 'Mark commits already included in the ancestry of the traced commit — directly or via cherry-pick — with a check icon, and keep them from being grayed out', false);
+const showIncludedCheckbox = createCompactToggle('Mark commits already in trace', 'Mark commits already covered by the traced commit — as an ancestor, or as a cherry-pick equivalent of one, wherever it is in the graph — with a check icon, and keep them from being grayed out', false);
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = document.createElementNS(NS, 'svg');
@@ -611,7 +611,7 @@ model.rows.forEach(row => {
 
   const details = document.createElement('div');
   details.className = 'details'; details.style.marginLeft = (graphWidth + 8) + 'px';
-  details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span>' + cherryPickIconHtml(row) + '<span class="includedIcon" title="Included in the selected branch(es) — directly or via cherry-pick">✓</span><span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
+  details.innerHTML = '<span class="hash" title="Copy full hash">' + row.shortHash + '</span>' + cherryPickIconHtml(row) + '<span class="includedIcon" title="Already covered by the traced commit — directly or via cherry-pick">✓</span><span class="subject" title="' + escapeForAttr(row.subject) + '">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>';
   details.querySelector('.hash').onclick = () => vscode.postMessage({type:'copyHash', hash:row.hash});
   details.querySelector('.subject').title += (details.querySelector('.subject').title ? ' — ' : '') + 'Click for commit details';
   details.querySelector('.subject').onclick = (e) => openCommitDetails(e, row, date);
