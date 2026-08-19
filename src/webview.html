@@ -69,7 +69,7 @@
   .commit { position:absolute; height:var(--row-h); display:flex; align-items:center; border-bottom:1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent); pointer-events:none; }
   .node { position:absolute; width:12px; height:12px; border-radius:50%; transform:translate(-6px,-6px); top:50%; background:var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-textLink-foreground)); border:2px solid var(--vscode-editor-background); box-shadow:0 0 0 1px var(--vscode-editorIndentGuide-activeBackground); pointer-events:auto; cursor:pointer; }
   .node.sharedBase { outline:2px dashed var(--vscode-descriptionForeground); outline-offset:2px; }
-  .node.included::after { content:'✓'; position:absolute; right:-3px; bottom:-3px; width:10px; height:10px; line-height:10px; font-size:8px; text-align:center; border-radius:50%; background:var(--vscode-gitDecoration-addedResourceForeground, #2ea043); color:#fff; }
+  .node.included::after { content:'✓'; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:10px; height:10px; line-height:10px; font-size:8px; text-align:center; border-radius:50%; background:var(--vscode-gitDecoration-addedResourceForeground, #2ea043); color:#fff; }
   .includedIcon { flex:0 0 auto; font-size:11px; color:var(--vscode-gitDecoration-addedResourceForeground, #2ea043); display:none; }
   .commit.mergeCommit .node { width:14px; height:14px; transform:translate(-7px,-7px) rotate(45deg); border-radius:2px; }
   .details { margin-left:28px; width:650px; display:flex; gap:9px; align-items:baseline; white-space:nowrap; overflow:hidden; }
