@@ -12,6 +12,8 @@ Target is to easily identify all the commits that lead to the current state in o
 - renders ordinary parent edges and dashed merge-parent edges
 - provides a synthetic `history` rail for commits that cannot be assigned to a current branch
 - click a branch header to focus/dim the rest of the graph
+- click a commit or a rail/lane to trace its full ancestry (not just the first-parent chain) back to the root, dimming everything unrelated
+- toggle **Mark commits already in trace** to check-mark commits already covered by the traced commit — as a literal ancestor, or as a cherry-pick equivalent living anywhere else in the graph — instead of leaving them dimmed
 - click a commit hash to copy it
 - refresh from the panel
 - supports multiple workspace repositories via a picker
@@ -65,10 +67,11 @@ Potential next steps:
 ## Project structure
 
 ```text
-src/git.js       Git command execution and repository model
-src/layout.js    editor-independent stable-lane layout
-src/extension.js VS Code integration + Webview renderer
-test/            Node built-in tests
+src/git.js        Git command execution and repository model
+src/layout.js     editor-independent stable-lane layout
+src/extension.js  VS Code integration (panel, commands, messages)
+src/webview.html  Webview markup/CSS/renderer
+test/             Node built-in tests
 ```
 
 ## License
