@@ -511,7 +511,7 @@ function cherryPickIconHtml(row) {
   return '<span class="cherryPickIcon" title="' + escapeForAttr(cherryPickTooltip(row)) + '">🍒</span>';
 }
 function cherryPickTooltip(row) {
-  return cherryPickLines(row).join('\\n');
+  return cherryPickLines(row).join('\n');
 }
 function cherryPickLines(row) {
   const lines = [];
@@ -641,7 +641,7 @@ if (model.hasMore) {
 
 function parseFilterTokens(str) {
   const tokens = [];
-  const re = /(author|message|commit|branch)\\s*:\\s*(?:"([^"]*)"|'([^']*)'|(\\S+))|"([^"]*)"|'([^']*)'|(\\S+)/gi;
+  const re = /(author|message|commit|branch)\s*:\s*(?:"([^"]*)"|'([^']*)'|(\S+))|"([^"]*)"|'([^']*)'|(\S+)/gi;
   let m;
   while ((m = re.exec(str))) {
     if (m[1] !== undefined) {
