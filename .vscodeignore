@@ -2,3 +2,10 @@
 .vscode/**
 test/**
 *.vsix
+.claude/**
+.gitignore
+node_modules/**
+!node_modules/@vscode/codicons/package.json
+!node_modules/@vscode/codicons/LICENSE
+!node_modules/@vscode/codicons/dist/codicon.css
+!node_modules/@vscode/codicons/dist/codicon.ttf
