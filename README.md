@@ -10,7 +10,7 @@ Target is to easily identify all the commits that lead to the current state in o
 - creates one stable vertical rail per current local/remote branch
 - assigns first-parent history to those rails
 - renders ordinary parent edges and dashed merge-parent edges
-- provides a synthetic `history` rail for commits that cannot be assigned to a current branch
+- provides a synthetic `history` rail for commits that cannot be assigned to a current branch; deleted branches that were alive at the same time are drawn as parallel tracks inside that one lane, and tracing a commit highlights only the track it actually uses
 - click a branch header to focus/dim the rest of the graph
 - click a commit or a rail/lane to trace its full ancestry (not just the first-parent chain) back to the root, dimming everything unrelated
 - toggle **Mark commits already in trace** to check-mark commits already covered by the traced commit — as a literal ancestor, or as a cherry-pick equivalent living anywhere else in the graph — instead of leaving them dimmed
@@ -82,5 +82,4 @@ MIT
 
 * color mode (configurable): draw each branch lane in different colors
 * rename to git-lanes?? extension needs a better name!
-* `history` lane is problematic, as multiple `history` lanes look like one, but in reality, there are multiple in parallel. how to visualize this without creating multiple history lanes in parallel from top to bottom? it would be ok to show these temporary lanes as in-between lanes. create a plan how to visualize first
 * add screenshots to README.md

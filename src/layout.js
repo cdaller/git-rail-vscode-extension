@@ -26,6 +26,35 @@ function buildLayout(repository, options = {}) {
   });
 
   const rowByHash = new Map(rows.map((row) => [row.hash, row]));
+
+  // The shared 'history' lane can hold several deleted branches that were alive at the same
+  // time. Each maximal first-parent run of history commits becomes a chain, and chains whose
+  // row ranges overlap get distinct sub-tracks, so they are drawn side by side inside the one
+  // lane instead of on top of each other.
+  const historyChains = [];
+  const historyRows = rows.filter((row) => row.lane === 'history');
+  // Rows come from `git log --date-order` (children before parents), so the first unassigned
+  // row reached is always the tip of a new chain.
+  historyRows.forEach((tip) => {
+    if (tip.historyChain !== undefined) return;
+    const chain = { id: historyChains.length, topRow: tip.row, bottomRow: tip.row, subLane: 0 };
+    let cur = tip;
+    while (cur && cur.lane === 'history' && cur.historyChain === undefined) {
+      cur.historyChain = chain.id;
+      chain.bottomRow = cur.row;
+      cur = rowByHash.get(cur.parents[0]);
+    }
+    historyChains.push(chain);
+  });
+  const subLaneBottoms = [];
+  historyChains.forEach((chain) => {
+    let slot = subLaneBottoms.findIndex((bottom) => bottom < chain.topRow);
+    if (slot === -1) slot = subLaneBottoms.length;
+    subLaneBottoms[slot] = chain.bottomRow;
+    chain.subLane = slot;
+  });
+  historyRows.forEach((row) => { row.subLane = historyChains[row.historyChain].subLane; });
+
   const edges = [];
 
   for (const child of rows) {
@@ -60,7 +89,7 @@ function buildLayout(repository, options = {}) {
     row.sharedBoundary = children.every((child) => !sameBranchSet(child.branches, row.branches));
   });
 
-  return { lanes, rows, edges };
+  return { lanes, rows, edges, historyChains, historySubLanes: subLaneBottoms.length };
 }
 
 module.exports = { buildLayout };

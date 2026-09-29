@@ -122,6 +122,15 @@ canvas.appendChild(header);
 
 function laneX(index) { return graphPadding + index * laneW + laneW / 2; }
 function rowY(index) { return index * rowH + rowH / 2; }
+// Horizontal offset of a history sub-lane (layout.js) from the center of the history lane, so
+// parallel deleted-branch chains sit side by side within that single lane.
+function subLaneOffset(subLane) {
+  const n = model.historySubLanes || 0;
+  if (subLane === undefined || n < 2) return 0;
+  const spacing = Math.min(14, (laneW - 16) / (n - 1));
+  return (subLane - (n - 1) / 2) * spacing;
+}
+function rowX(row) { return laneX(row.laneIndex) + subLaneOffset(row.subLane); }
 
 const branchPopover = document.createElement('div');
 branchPopover.className = 'branchPopover';
@@ -268,7 +277,9 @@ model.lanes.forEach((lane, i) => {
   const line = document.createElementNS(NS, 'line');
   line.setAttribute('x1', laneX(i)); line.setAttribute('x2', laneX(i));
   line.setAttribute('y1', topY); line.setAttribute('y2', bottomY);
-  line.setAttribute('class', 'rail'); line.dataset.lane = lane;
+  // The history lane's own chains are drawn as separate segments (historyChainRailEls), so its
+  // full rail only stays as a faint marker of the shared lane.
+  line.setAttribute('class', 'rail' + (lane === 'history' ? ' railFaint' : '')); line.dataset.lane = lane;
   line.onclick = onRailClick;
   svg.appendChild(line);
   railEls.push(line);
@@ -283,6 +294,23 @@ model.lanes.forEach((lane, i) => {
 });
 
 const rowByHash = new Map(model.rows.map(r => [r.hash, r]));
+
+const historyLaneIndex = model.lanes.indexOf('history');
+const historyChainRailEls = (model.historyChains || []).map((chain) => {
+  const chainRows = model.rows.filter(r => r.historyChain === chain.id);
+  const line = document.createElementNS(NS, 'line');
+  const x = laneX(historyLaneIndex) + subLaneOffset(chain.subLane);
+  line.setAttribute('x1', x); line.setAttribute('x2', x);
+  line.setAttribute('y1', rowY(chain.topRow)); line.setAttribute('y2', rowY(chain.bottomRow));
+  line.setAttribute('class', 'rail'); line.dataset.lane = 'history';
+  line.onclick = (e) => {
+    e.stopPropagation();
+    const target = nearestRow(chainRows, e.clientY);
+    if (target) toggleTrace(target);
+  };
+  svg.appendChild(line);
+  return { line, chain, chainRows };
+});
 
 // Cherry-pick equivalence classes: commits that are cherry-picks of each other (via commit
 // message trailer or matching patch-id) are grouped so that "included in the traced ancestry"
@@ -387,6 +415,9 @@ function applyTrace() {
     const isSpine = !edge.mergeParent && activeTrace.spineHashes.has(edge.childHash) && activeTrace.spineHashes.has(edge.parentHash);
     path.classList.add(isSpine ? 'traceSpine' : 'traceMerged');
   });
+  historyChainRailEls.forEach(({ line, chainRows }) => {
+    line.classList.toggle('traceDim', Boolean(activeTrace) && !chainRows.some(r => activeTrace.ancestryHashes.has(r.hash)));
+  });
 }
 function toggleTrace(row) {
   selectedLanes.clear();
@@ -412,14 +443,18 @@ function topRowOfLane(laneIndex) {
 // column, so tracing always from the topmost commit would silently ignore the others. Using
 // the commit nearest the actual click lets each chain be traced by clicking near it.
 function nearestRowInLane(laneIndex, clientY) {
+  return nearestRow(model.rows.filter(r => r.laneIndex === laneIndex), clientY) || topRowOfLane(laneIndex);
+}
+function nearestRow(rows, clientY) {
+  const candidates = new Set(rows);
   let best = null, bestDist = Infinity;
   commitEls.forEach(({ el, row }) => {
-    if (row.laneIndex !== laneIndex || el.style.display === 'none') return;
+    if (!candidates.has(row) || el.style.display === 'none') return;
     const rect = el.getBoundingClientRect();
     const dist = Math.abs(rect.top + rect.height / 2 - clientY);
     if (dist < bestDist) { bestDist = dist; best = row; }
   });
-  return best || topRowOfLane(laneIndex);
+  return best;
 }
 
 const edgePopover = document.createElement('div');
@@ -428,8 +463,10 @@ document.body.appendChild(edgePopover);
 
 const edgeEls = [];
 model.edges.forEach(edge => {
-  const x1 = laneX(edge.fromLane), y1 = rowY(edge.fromRow);
-  const x2 = laneX(edge.toLane), y2 = rowY(edge.toRow);
+  edge.fromOffset = subLaneOffset(rowByHash.get(edge.childHash).subLane);
+  edge.toOffset = subLaneOffset(rowByHash.get(edge.parentHash).subLane);
+  const x1 = laneX(edge.fromLane) + edge.fromOffset, y1 = rowY(edge.fromRow);
+  const x2 = laneX(edge.toLane) + edge.toOffset, y2 = rowY(edge.toRow);
   const path = document.createElementNS(NS, 'path');
   path.setAttribute('d', edgePathD(x1, y1, x2, y2));
   path.setAttribute('class', 'edge' + (edge.mergeParent ? ' merge' : ''));
@@ -461,9 +498,9 @@ model.rows.forEach(row => {
   if (!originHash) return;
   const origin = rowByHash.get(originHash);
   if (!origin) return;
-  const cherryEdge = { fromLane: origin.laneIndex, fromRow: origin.row, toLane: row.laneIndex, toRow: row.row };
+  const cherryEdge = { fromLane: origin.laneIndex, fromRow: origin.row, toLane: row.laneIndex, toRow: row.row, fromOffset: subLaneOffset(origin.subLane), toOffset: subLaneOffset(row.subLane) };
   const path = document.createElementNS(NS, 'path');
-  path.setAttribute('d', edgePathD(laneX(cherryEdge.fromLane), rowY(cherryEdge.fromRow), laneX(cherryEdge.toLane), rowY(cherryEdge.toRow)));
+  path.setAttribute('d', edgePathD(rowX(origin), rowY(cherryEdge.fromRow), rowX(row), rowY(cherryEdge.toRow)));
   path.setAttribute('class', 'cherryPickEdge');
   path.onmouseenter = (e) => {
     commitPopover.innerHTML = '<span class="hash">' + origin.shortHash + '</span><span class="subject">' + escapeHtmlClient(origin.subject) + '</span>' +
@@ -595,7 +632,7 @@ model.rows.forEach(row => {
   const isShared = row.branches && row.branches.length > 1;
   const node = document.createElement('span');
   node.className = 'node' + (row.sharedBoundary ? ' sharedBase' : '');
-  node.style.left = laneX(row.laneIndex) + 'px';
+  node.style.left = rowX(row) + 'px';
   node.onmouseenter = () => {
     commitPopover.innerHTML = '<span class="hash">' + row.shortHash + '</span><span class="subject">' + escapeHtmlClient(row.subject) + '</span><span class="meta">' + escapeHtmlClient(row.author) + ' · ' + date + '</span>' +
       (isShared ? '<div class="meta">Base for: ' + escapeHtmlClient(row.branches.join(', ')) + '</div>' : '') +
@@ -773,7 +810,7 @@ function applyFilter() {
     } else if (visible) {
       el.style.top = (headerH + compactRowIndex.get(row.row) * rowH) + 'px';
     }
-    if (visible) node.style.left = currentLaneX(row.laneIndex) + 'px';
+    if (visible) node.style.left = (currentLaneX(row.laneIndex) + subLaneOffset(row.subLane)) + 'px';
     details.style.marginLeft = (currentGraphWidth + 8) + 'px';
   });
 
@@ -800,6 +837,17 @@ function applyFilter() {
     }
   });
 
+  historyChainRailEls.forEach(({ line, chain, chainRows }) => {
+    const visibleRows = chainRows.filter(r => visibleByRow.get(r.row));
+    const show = (!compactBranches || visibleLanes.has(historyLaneIndex)) && (!compactRows || visibleRows.length > 0);
+    line.style.display = show ? '' : 'none';
+    if (!show) return;
+    const x = currentLaneX(historyLaneIndex) + subLaneOffset(chain.subLane);
+    line.setAttribute('x1', x); line.setAttribute('x2', x);
+    line.setAttribute('y1', compactRows ? currentRowY(visibleRows[0].row) : rowY(chain.topRow));
+    line.setAttribute('y2', compactRows ? currentRowY(visibleRows[visibleRows.length - 1].row) : rowY(chain.bottomRow));
+  });
+
   if (loadMoreEl) {
     loadMoreEl.style.top = (headerH + newBodyHeight) + 'px';
     loadMoreEl.style.width = currentWidth + 'px';
@@ -809,7 +857,7 @@ function applyFilter() {
   edgeEls.forEach(({ path, edge }) => {
     if (!anyCompact) {
       path.style.display = '';
-      path.setAttribute('d', edgePathD(laneX(edge.fromLane), rowY(edge.fromRow), laneX(edge.toLane), rowY(edge.toRow)));
+      path.setAttribute('d', edgePathD(laneX(edge.fromLane) + edge.fromOffset, rowY(edge.fromRow), laneX(edge.toLane) + edge.toOffset, rowY(edge.toRow)));
       return;
     }
     if (!visibleByRow.get(edge.fromRow) || !visibleByRow.get(edge.toRow)) {
@@ -817,7 +865,7 @@ function applyFilter() {
       return;
     }
     path.style.display = '';
-    path.setAttribute('d', edgePathD(currentLaneX(edge.fromLane), currentRowY(edge.fromRow), currentLaneX(edge.toLane), currentRowY(edge.toRow)));
+    path.setAttribute('d', edgePathD(currentLaneX(edge.fromLane) + edge.fromOffset, currentRowY(edge.fromRow), currentLaneX(edge.toLane) + edge.toOffset, currentRowY(edge.toRow)));
   });
 
   cherryPickEdgeEls.forEach(({ path, edge }) => {
@@ -829,9 +877,9 @@ function applyFilter() {
       path.style.display = 'none';
       return;
     }
-    const x1 = anyCompact ? currentLaneX(edge.fromLane) : laneX(edge.fromLane);
+    const x1 = (anyCompact ? currentLaneX(edge.fromLane) : laneX(edge.fromLane)) + edge.fromOffset;
     const y1 = anyCompact ? currentRowY(edge.fromRow) : rowY(edge.fromRow);
-    const x2 = anyCompact ? currentLaneX(edge.toLane) : laneX(edge.toLane);
+    const x2 = (anyCompact ? currentLaneX(edge.toLane) : laneX(edge.toLane)) + edge.toOffset;
     const y2 = anyCompact ? currentRowY(edge.toRow) : rowY(edge.toRow);
     path.style.display = '';
     path.setAttribute('d', edgePathD(x1, y1, x2, y2));
